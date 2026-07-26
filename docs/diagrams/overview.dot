@@ -1,0 +1,73 @@
+digraph overview {
+    compound=true;
+    rankdir=TB;
+    bgcolor="white";
+    pad=0.3;
+    node [style=filled, fontname="Segoe UI", fontsize=11, shape=box, style="rounded,filled"];
+    edge [fontname="Segoe UI", fontsize=9, color="#555555"];
+
+    subgraph cluster_user {
+        label="User Layer";
+        style="rounded,filled";
+        fillcolor="#eef2ff";
+        fontname="Segoe UI";
+        UI    [label="Streamlit UI\nstreamlit_app/app.py\n:8501", fillcolor="#2563eb", fontcolor="white"];
+        ADMIN [label="Adminer (DB UI)\n:8081", fillcolor="#94a3b8", fontcolor="white"];
+        KUI   [label="Redpanda Console\n(Kafka UI) :8080", fillcolor="#94a3b8", fontcolor="white"];
+    }
+
+    subgraph cluster_app {
+        label="Application Layer";
+        style="rounded,filled";
+        fillcolor="#f5f3ff";
+        fontname="Segoe UI";
+        API   [label="FastAPI Backend\nbackend/main.py\n:8000", fillcolor="#2563eb", fontcolor="white"];
+        ML    [label="ML Prediction Service\nml_service/main.py", fillcolor="#7c3aed", fontcolor="white"];
+        TRAIN [label="Training Script\nml_service/train.py", fillcolor="#7c3aed", fontcolor="white"];
+    }
+
+    subgraph cluster_stream {
+        label="Streaming Layer";
+        style="rounded,filled";
+        fillcolor="#f1f5f9";
+        fontname="Segoe UI";
+        DEB   [label="Debezium Connect (CDC)\n:8083", fillcolor="#4b5563", fontcolor="white"];
+        KAFKA [label="Kafka Broker\n:9092", fillcolor="#4b5563", fontcolor="white"];
+        ZK    [label="Zookeeper\n:2181", fillcolor="#9ca3af", fontcolor="white"];
+    }
+
+    subgraph cluster_storage {
+        label="Storage Layer";
+        style="rounded,filled";
+        fillcolor="#ecfdf5";
+        fontname="Segoe UI";
+        PG    [label="PostgreSQL :5432\ncars_db.listings\n+ mlflow backend store", shape=cylinder, fillcolor="#059669", fontcolor="white"];
+        MINIO [label="MinIO (S3) :9000/:9001\nmodel artifacts", shape=cylinder, fillcolor="#059669", fontcolor="white"];
+        CSV   [label="data/ford.csv\ntraining dataset", shape=note, fillcolor="#059669", fontcolor="white"];
+    }
+
+    subgraph cluster_ml {
+        label="ML Platform";
+        style="rounded,filled";
+        fillcolor="#faf5ff";
+        fontname="Segoe UI";
+        MLFLOW [label="MLflow Server :5000\ntracking + registry", fillcolor="#7c3aed", fontcolor="white"];
+    }
+
+    UI    -> API    [label="HTTP GET/POST /cars"];
+    API   -> PG     [label="SQL (SQLAlchemy)"];
+    API   -> KAFKA  [label="produce: new listing"];
+    KAFKA -> API    [label="consume: predictions"];
+    PG    -> DEB    [label="WAL (logical replication)"];
+    DEB   -> KAFKA  [label="CDC events\ncars-db.public.listings"];
+    KAFKA -> ML     [label="consume: listings"];
+    ML    -> KAFKA  [label="produce: predictions\ncars.public.predictions"];
+    ML    -> MLFLOW [label="load latest model run"];
+    TRAIN -> MLFLOW [label="log params/metrics/model"];
+    MLFLOW -> PG    [label="backend store\n(runs metadata)"];
+    MLFLOW -> MINIO [label="artifact store\n(model binaries)"];
+    CSV   -> TRAIN;
+    ZK    -> KAFKA  [style=dashed, arrowhead=none];
+    ADMIN -> PG;
+    KUI   -> KAFKA;
+}

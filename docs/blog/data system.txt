@@ -1,0 +1,32 @@
+A breakdown of 𝗗𝗮𝘁𝗮 𝗣𝗶𝗽𝗲𝗹𝗶𝗻𝗲𝘀 𝗶𝗻 𝗠𝗮𝗰𝗵𝗶𝗻𝗲 𝗟𝗲𝗮𝗿𝗻𝗶𝗻𝗴 𝗦𝘆𝘀𝘁𝗲𝗺𝘀 👇 And yes, it can also be used for LLM based systems!
+
+It is critical to ensure Data Quality and Integrity upstream of ML Training and Inference Pipelines, trying to do that in the downstream systems will cause unavoidable failure when working at scale.
+
+There is a ton of work to be done on the Data Lake or LakeHouse layer. 𝗦𝗲𝗲 𝘁𝗵𝗲 𝗲𝘅𝗮𝗺𝗽𝗹𝗲 𝗮𝗿𝗰𝗵𝗶𝘁𝗲𝗰𝘁𝘂𝗿𝗲 𝗯𝗲𝗹𝗼𝘄.
+
+𝘌𝘹𝘢𝘮𝘱𝘭𝘦 𝘢𝘳𝘤𝘩𝘪𝘵𝘦𝘤𝘵𝘶𝘳𝘦 𝘧𝘰𝘳 𝘢 𝘱𝘳𝘰𝘥𝘶𝘤𝘵𝘪𝘰𝘯 𝘨𝘳𝘢𝘥𝘦 𝘦𝘯𝘥-𝘵𝘰-𝘦𝘯𝘥 𝘥𝘢𝘵𝘢 𝘧𝘭𝘰𝘸:
+
+𝟭: Schema changes are implemented in version control, once approved - they are pushed to the Applications generating the Data, Databases holding the Data and a central Data Contract Registry.
+
+Applications push generated Data to Kafka Topics:
+
+𝟮: Events emitted directly by the Application Services.
+
+👉 This also includes IoT Fleets and Website Activity Tracking.
+
+𝟮.𝟭: Raw Data Topics for CDC streams.
+
+𝟯: A Flink Application(s) consumes Data from Raw Data streams and validates it against schemas in the Contract Registry.
+𝟰: Data that does not meet the contract is pushed to Dead Letter Topic.
+𝟱: Data that meets the contract is pushed to Validated Data Topic.
+𝟲: Data from the Validated Data Topic is pushed to object storage for additional Validation.
+𝟳: On a schedule Data in the Object Storage is validated against additional SLAs in Data Contracts and is pushed to the Data Warehouse to be Transformed and Modeled for Analytical purposes.
+𝟴: Modeled and Curated data is pushed to the Feature Store System for further Feature Engineering.
+𝟴.𝟭: Real Time Features are ingested into the Feature Store directly from Validated Data Topic (5).
+
+👉 Ensuring Data Quality here is complicated since checks against SLAs is hard to perform.
+
+𝟵: High Quality Data is used in Machine Learning Training Pipelines.
+𝟭𝟬: The same Data is used for Feature Serving in Inference.
+
+Note: ML Systems are plagued by other Data related issues like Data and Concept Drifts. These are silent failures and while they can be monitored, we can’t include it in the Data Contract.

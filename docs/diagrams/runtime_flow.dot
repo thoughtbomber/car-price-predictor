@@ -1,0 +1,34 @@
+digraph runtime_flow {
+    rankdir=TB;
+    bgcolor="white";
+    pad=0.3;
+    nodesep=0.5;
+    ranksep=0.6;
+    node [style="rounded,filled", fontname="Segoe UI", fontsize=11, shape=box];
+    edge [fontname="Segoe UI", fontsize=9, color="#555555"];
+
+    USER  [label="User", shape=oval, fillcolor="#fbbf24"];
+    UI    [label="Streamlit UI :8501\n\"Add New Car\" form / dashboard", fillcolor="#2563eb", fontcolor="white"];
+    API   [label="FastAPI Backend :8000\nPOST /cars · GET /cars", fillcolor="#2563eb", fontcolor="white"];
+    PG    [label="PostgreSQL\ncars_db.listings", shape=cylinder, fillcolor="#059669", fontcolor="white"];
+    DEB   [label="Debezium CDC\nWAL → change events", fillcolor="#4b5563", fontcolor="white"];
+    K     [label="Kafka :9092", fillcolor="#4b5563", fontcolor="white"];
+    ML    [label="ML Service\npreprocess + model.predict()", fillcolor="#7c3aed", fontcolor="white"];
+    MF    [label="MLflow :5000 + MinIO\nlatest model run,\nlabel_encoders.pkl, scaler.pkl", fillcolor="#7c3aed", fontcolor="white"];
+
+    USER -> UI  [label="1. fill form"];
+    UI   -> API [label="2. POST /cars (car JSON)"];
+    API  -> PG  [label="3. INSERT INTO listings\n(predicted_price = NULL)"];
+    API  -> UI  [label="4. 200 OK (car with id)", style=dashed];
+    API  -> K   [label="5. produce car JSON\n→ cars-db.public.listings"];
+    PG   -> DEB [label="6. WAL change event (INSERT)"];
+    DEB  -> K   [label="7. CDC event\n→ cars-db.public.listings"];
+    K    -> ML  [label="8. consume listing\n(raw JSON or Debezium envelope)"];
+    MF   -> ML  [label="(startup) load model\n+ artifacts", style=dashed];
+    ML   -> K   [label="9. produce {id, predicted_price}\n→ cars.public.predictions"];
+    K    -> API [label="10. background consumer thread\npolls predictions"];
+    API  -> PG  [label="11. UPDATE listings\nSET predicted_price WHERE id"];
+    UI   -> API [label="12. GET /cars (refresh)"];
+    API  -> UI  [label="13. cars incl. predicted_price", style=dashed];
+    UI   -> USER [label="14. charts + table\nwith predictions"];
+}

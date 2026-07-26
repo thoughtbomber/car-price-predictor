@@ -1,0 +1,34 @@
+digraph training_pipeline {
+    rankdir=LR;
+    bgcolor="white";
+    pad=0.3;
+    nodesep=0.45;
+    ranksep=0.7;
+    node [style="rounded,filled", fontname="Segoe UI", fontsize=11, shape=box];
+    edge [fontname="Segoe UI", fontsize=9, color="#555555"];
+
+    CSV  [label="data/ford.csv", shape=note, fillcolor="#059669", fontcolor="white"];
+    PREP [label="ml_service/train.py\nprepare_data()", fillcolor="#7c3aed", fontcolor="white"];
+    ENC  [label="LabelEncoder\nmodel, transmission, fuelType\n→ label_encoders.pkl", fillcolor="#a78bfa"];
+    SC   [label="StandardScaler\nyear, mileage, tax, mpg, engineSize\n→ scaler.pkl", fillcolor="#a78bfa"];
+    RF   [label="RandomForestRegressor\ntrain/test split 80/20", fillcolor="#7c3aed", fontcolor="white"];
+    MET  [label="metrics\nRMSE · MAE · R²", fillcolor="#a78bfa"];
+    MLF  [label="MLflow Server :5000\ntracking + registry", fillcolor="#7c3aed", fontcolor="white"];
+    PG   [label="PostgreSQL mlflow DB\nruns, params, metrics", shape=cylinder, fillcolor="#059669", fontcolor="white"];
+    MIN  [label="MinIO s3://mlflow/\nmodel binaries + artifacts", shape=cylinder, fillcolor="#059669", fontcolor="white"];
+    REG  [label="Model Registry\ncar_price_predictor\nalias: production", fillcolor="#7c3aed", fontcolor="white"];
+
+    CSV -> PREP;
+    PREP -> ENC;
+    PREP -> SC;
+    ENC -> RF;
+    SC  -> RF;
+    RF  -> MET;
+    RF  -> MLF [label="log model + params"];
+    MET -> MLF [label="log metrics"];
+    ENC -> MLF [label="log artifact", style=dashed];
+    SC  -> MLF [label="log artifact", style=dashed];
+    MLF -> PG  [label="backend store"];
+    MLF -> MIN [label="artifact store"];
+    MLF -> REG;
+}
