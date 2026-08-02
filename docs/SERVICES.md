@@ -18,7 +18,8 @@ This project is an end-to-end **car price prediction platform**: users add car l
 ### 3. Kafka (`kafka`)
 - Image: `confluentinc/cp-kafka:7.4.0`, port `9092` (host) / `29092` (internal)
 - The event backbone. Key topics:
-  - `cars-db.public.listings` — CDC events for every insert/update to the `listings` table (produced by Debezium; the backend also publishes here directly)
+  - `cars-db.public.listings` — CDC events for every insert/update to the `listings` table (produced by Debezium; it is the *only* publisher)
+  - `cars-db.public.listings.dlq` — dead letter topic: listing events that fail contract validation
   - `cars.public.predictions` — prediction results produced by the ML service
 
 ### 4. Debezium Connect (`connect`)
@@ -46,12 +47,13 @@ This project is an end-to-end **car price prediction platform**: users add car l
 ### 9. Backend API (`backend/main.py`)
 - FastAPI app, port `8000`
 - REST interface to the `listings` table: `GET /cars`, `POST /cars`, `GET /cars/{id}`, `GET /health`
-- On `POST /cars`: validates input (Pydantic), inserts into Postgres, and publishes the new listing to the `cars-db.public.listings` Kafka topic.
-- Runs a background **Kafka consumer thread** on `cars.public.predictions`: when a prediction arrives, it writes `predicted_price` back into the corresponding row in Postgres.
+- On `POST /cars`: validates input (Pydantic — the same data contract as `contracts/listing_event_v1.json`, enforced at the producing application) and inserts into Postgres. Debezium CDC takes it from there; the backend never publishes to Kafka.
+- Runs a background **Kafka consumer thread** on `cars.public.predictions`: when a prediction arrives, it writes `predicted_price` back into the corresponding row in Postgres and appends the full event (features + `model_version`) to the `predictions_log` table for monitoring and lineage.
 
 ### 10. ML Service (`ml_service/`)
-- **`train.py`** — offline training script. Reads `data/ford.csv`, preprocesses (LabelEncoder for categoricals, StandardScaler for numerics), trains a `RandomForestRegressor`, and logs params/metrics/model to **MLflow** (artifacts land in **MinIO**). Registers the model as `car_price_predictor` and tags the latest version as `production`. Saves `label_encoders.pkl` and `scaler.pkl` locally for the inference side.
-- **`main.py`** — online inference service. Loads the latest model from MLflow plus the local preprocessing artifacts, consumes listings from `cars-db.public.listings` (handles both Debezium CDC envelope and plain JSON), predicts a price, and produces the result to `cars.public.predictions`.
+- **`train.py`** — offline training script. Reads `data/ford.csv` and trains a single sklearn **Pipeline** (`ColumnTransformer`: OneHotEncoder `handle_unknown='ignore'` for categoricals, StandardScaler for numerics → `RandomForestRegressor`), so preprocessing travels inside the model artifact (train/serve parity, no separate pickles). Logs params/metrics/model to **MLflow** (artifacts land in **MinIO**), registers the model as `car_price_predictor`, tags the new version `staging`, and promotes it to the `production` alias **only if its RMSE beats the current production model** (champion/challenger gate).
+- **`main.py`** — online inference service. Loads the model from the registry via `models:/car_price_predictor@production`, consumes listings from `cars-db.public.listings` (unwraps the Debezium CDC envelope), **validates each event against the data contract** (`contracts/listing_event_v1.json`, JSON Schema), routes violations to the `cars-db.public.listings.dlq` dead letter topic, predicts a price, and produces the result (including `model_version`) to `cars.public.predictions`.
+- **`monitor.py`** — drift monitor. Compares feature distributions in the `predictions_log` table against the training data (`data/ford.csv`) using PSI (threshold 0.2), prints a report, and logs it to the `drift-monitoring` MLflow experiment.
 
 ### 11. Streamlit Frontend (`streamlit_app/app.py`)
 - Streamlit dashboard (default port `8501`)
@@ -62,19 +64,20 @@ This project is an end-to-end **car price prediction platform**: users add car l
 ### Runtime / inference flow
 ```
 Streamlit UI ──POST /cars──▶ Backend API ──insert──▶ PostgreSQL (listings)
-                                  │                        │
-                                  │ (direct publish)       │ CDC (WAL)
-                                  ▼                        ▼
-                          Kafka topic: cars-db.public.listings ◀── Debezium
-                                  │
-                                  ▼
-                          ML Service (consume → predict)
-                                  │
+                                                         │ CDC (WAL)
+                                                         ▼
+                              Kafka topic: cars-db.public.listings ◀── Debezium
+                                                         │
+                                                         ▼
+                              ML Service (consume → validate contract → predict)
+                                  │              │
+                                  │              └─ invalid ─▶ DLQ topic: cars-db.public.listings.dlq
                                   ▼
                           Kafka topic: cars.public.predictions
                                   │
                                   ▼
                           Backend consumer thread ──update predicted_price──▶ PostgreSQL
+                                  └──────────────append features + model_version──▶ predictions_log
                                   │
 Streamlit UI ◀──GET /cars─────────┘ (dashboard now shows predicted prices)
 ```

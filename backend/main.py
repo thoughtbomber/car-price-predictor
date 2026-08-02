@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, validator
 from typing import Optional, List, Dict, Any
 import os
 from datetime import datetime
-from kafka import KafkaProducer, KafkaConsumer
+from kafka import KafkaConsumer
 import json
 import logging
 from contextlib import contextmanager
@@ -33,7 +33,6 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
-KAFKA_TOPIC_LISTINGS = "cars-db.public.listings"
 KAFKA_TOPIC_PREDICTIONS = "cars.public.predictions"
 
 class Car(Base):
@@ -52,6 +51,23 @@ class Car(Base):
     predicted_price = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class PredictionLog(Base):
+    __tablename__ = "predictions_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    car_id = Column(Integer)
+    model = Column(String)
+    year = Column(Integer)
+    transmission = Column(String)
+    mileage = Column(Integer)
+    fuelType = Column(String)
+    tax = Column(Float)
+    mpg = Column(Float)
+    engineSize = Column(Float)
+    predicted_price = Column(Float)
+    model_version = Column(String, nullable=True)
+    predicted_at = Column(DateTime, default=datetime.utcnow)
 
 class CarBase(BaseModel):
     model: str = Field(..., example="Fiesta")
@@ -99,19 +115,9 @@ def get_db():
         db.close()
 
 class KafkaManager:
-    _producer = None
     _consumer = None
     _consumer_thread = None
     _running = False
-
-    @classmethod
-    def get_producer(cls):
-        if cls._producer is None:
-            cls._producer = KafkaProducer(
-                bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-                value_serializer=lambda x: json.dumps(x).encode('utf-8')
-            )
-        return cls._producer
 
     @classmethod
     def start_consumer(cls):
@@ -150,13 +156,31 @@ class KafkaManager:
             with get_db() as db:
                 car_id = prediction_data.get('id')
                 predicted_price = prediction_data.get('predicted_price')
-                
+
                 if car_id and predicted_price:
                     car = db.query(Car).filter(Car.id == car_id).first()
                     if car:
                         car.predicted_price = predicted_price
                         db.commit()
                         logger.info(f"Updated prediction for car {car_id}: £{predicted_price:,.2f}")
+
+                    # Log every prediction for monitoring and lineage, even if the
+                    # listing row is already gone.
+                    log_entry = PredictionLog(
+                        car_id=car_id,
+                        model=prediction_data.get('model'),
+                        year=prediction_data.get('year'),
+                        transmission=prediction_data.get('transmission'),
+                        mileage=prediction_data.get('mileage'),
+                        fuelType=prediction_data.get('fuelType'),
+                        tax=prediction_data.get('tax'),
+                        mpg=prediction_data.get('mpg'),
+                        engineSize=prediction_data.get('engineSize'),
+                        predicted_price=predicted_price,
+                        model_version=prediction_data.get('model_version'),
+                    )
+                    db.add(log_entry)
+                    db.commit()
         except Exception as e:
             logger.error(f"Error handling prediction: {str(e)}")
 
@@ -174,15 +198,7 @@ def create_car(car: CarCreate):
         db.add(db_car)
         db.commit()
         db.refresh(db_car)
-        
-        try:
-            producer = KafkaManager.get_producer()
-            producer.send(KAFKA_TOPIC_LISTINGS, db_car.__dict__)
-            producer.flush()
-            logger.info(f"Sent car {db_car.id} to Kafka")
-        except Exception as e:
-            logger.error(f"Error sending to Kafka: {str(e)}")
-        
+        # Debezium CDC streams this insert to Kafka; no direct publish here.
         return db_car
 
 @app.get("/cars/{car_id}", response_model=CarResponse)

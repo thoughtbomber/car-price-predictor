@@ -88,7 +88,7 @@ uvicorn main:app --reload
 
 5. Start the Streamlit frontend:
 ```bash
-cd web-ui
+cd streamlit_app
 streamlit run app.py
 ```
 
@@ -109,11 +109,15 @@ streamlit run app.py
 ├── data/                  # Training data
 │   └── ford.csv          # Sample car data
 ├── ml_service/           # ML training and prediction service
-│   ├── train.py         # Model training script
-│   └── main.py          # Prediction service
+│   ├── train.py         # Model training script (Pipeline + staging→production gate)
+│   ├── main.py          # Prediction service (contract validation + DLQ)
+│   ├── monitor.py       # Drift monitoring report (PSI vs training data)
+│   └── tests/           # Unit tests (pytest)
+├── contracts/            # Data contracts (JSON Schema, versioned)
+│   └── listing_event_v1.json
 ├── mlflow/               # MLflow service configuration
 ├── postgres/            # PostgreSQL initialization scripts
-├── web-ui/              # Streamlit frontend application
+├── streamlit_app/       # Streamlit frontend application
 │   ├── app.py          # Main Streamlit application
 │   └── requirements.txt # Python dependencies
 ├── docker-compose.yml   # Docker services configuration
@@ -143,7 +147,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ### Frontend Development
 
 ```bash
-cd web-ui
+cd streamlit_app
 pip install -r requirements.txt
 streamlit run app.py
 ```
@@ -155,6 +159,21 @@ cd ml_service
 pip install -r requirements.txt
 python train.py
 ```
+
+### Drift Monitoring
+
+After some predictions have been served, compare their feature distributions
+against the training data (PSI, threshold 0.2) and log the report to MLflow:
+
+```bash
+cd ml_service
+python monitor.py
+```
+
+Note: the `predictions_log` table is created by `postgres/init.sql`, which only
+runs on a fresh database volume. For an existing deployment either recreate the
+volume (`docker compose down -v` — this wipes all data) or create the table
+manually via Adminer.
 
 ## API Documentation
 

@@ -17,6 +17,7 @@ graph TB
         API["FastAPI Backend<br/>backend/main.py<br/>:8000"]
         ML["ML Prediction Service<br/>ml_service/main.py"]
         TRAIN["Training Script<br/>ml_service/train.py"]
+        MON["Drift Monitor<br/>ml_service/monitor.py"]
     end
 
     subgraph "Streaming Layer"
@@ -26,7 +27,7 @@ graph TB
     end
 
     subgraph "Storage Layer"
-        PG[("PostgreSQL :5432<br/>cars_db.listings<br/>+ mlflow backend store")]
+        PG[("PostgreSQL :5432<br/>cars_db.listings<br/>+ predictions_log<br/>+ mlflow backend store")]
         MINIO[("MinIO (S3) :9000/:9001<br/>model artifacts")]
         CSV[/"data/ford.csv<br/>training dataset"/]
     end
@@ -37,14 +38,16 @@ graph TB
 
     UI -->|"HTTP GET/POST /cars"| API
     API -->|"SQL (SQLAlchemy)"| PG
-    API -->|"produce: new listing"| KAFKA
     API -->|"consume: predictions"| KAFKA
     PG -->|"WAL (logical replication)"| DEB
     DEB -->|"CDC events → topic<br/>cars-db.public.listings"| KAFKA
     KAFKA -->|"consume: listings"| ML
+    ML -->|"contract violations → DLQ topic<br/>cars-db.public.listings.dlq"| KAFKA
     ML -->|"produce: predictions → topic<br/>cars.public.predictions"| KAFKA
-    ML -->|"load latest model run"| MLFLOW
-    TRAIN -->|"log params/metrics/model"| MLFLOW
+    ML -->|"load @production model alias"| MLFLOW
+    TRAIN -->|"log params/metrics/model,<br/>staging → production gate"| MLFLOW
+    MON -->|"read predictions_log"| PG
+    MON -->|"log drift metrics"| MLFLOW
     MLFLOW -->|"backend store (runs metadata)"| PG
     MLFLOW -->|"artifact store (model binaries)"| MINIO
     CSV --> TRAIN
@@ -74,18 +77,19 @@ sequenceDiagram
     UI->>API: POST /cars (car JSON)
     API->>PG: INSERT INTO listings (predicted_price = NULL)
     API-->>UI: 200 OK (car with id)
-    API->>K: produce car JSON → topic cars-db.public.listings
     PG-->>DEB: WAL change event (INSERT)
     DEB->>K: CDC event → topic cars-db.public.listings
 
-    K->>ML: consume listing (raw JSON or Debezium envelope)
-    Note over ML: unwraps payload.after if present,<br/>validates required fields
-    ML->>MF: (at startup) load latest model run,<br/>label_encoders.pkl, scaler.pkl
-    ML->>ML: preprocess (label-encode + scale)<br/>model.predict()
-    ML->>K: produce {id, predicted_price, ...} → topic cars.public.predictions
+    K->>ML: consume listing (Debezium envelope)
+    Note over ML: unwraps payload.after, validates against the<br/>data contract (contracts/listing_event_v1.json)
+    ML->>K: contract violation → DLQ topic cars-db.public.listings.dlq
+    ML->>MF: (at startup) load models:/car_price_predictor@production
+    ML->>ML: pipeline preprocessing + model.predict()
+    ML->>K: produce {id, predicted_price, model_version, ...} → topic cars.public.predictions
 
     K->>API: background consumer thread polls predictions
     API->>PG: UPDATE listings SET predicted_price WHERE id = car_id
+    API->>PG: INSERT INTO predictions_log (features, model_version)
 
     User->>UI: Refresh dashboard
     UI->>API: GET /cars
@@ -99,35 +103,50 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     CSV[/"data/ford.csv"/] --> P["ml_service/train.py"]
-    P --> ENC["LabelEncoder<br/>(model, transmission, fuelType)"]
-    P --> SC["StandardScaler<br/>(year, mileage, tax, mpg, engineSize)"]
-    ENC --> RF["RandomForestRegressor<br/>train/test split 80/20"]
-    SC --> RF
+    P --> CT["ColumnTransformer:<br/>OneHotEncoder (handle_unknown='ignore')<br/>+ StandardScaler"]
+    CT --> RF["sklearn Pipeline:<br/>preprocessor + RandomForestRegressor<br/>train/test split 80/20"]
     RF --> METRICS["metrics: RMSE, MAE, R²"]
     RF --> MLFLOW["MLflow Server :5000"]
-    ENC -.->|"label_encoders.pkl<br/>(saved next to train.py + logged)"| MLFLOW
-    SC -.->|"scaler.pkl<br/>(saved next to train.py + logged)"| MLFLOW
     METRICS --> MLFLOW
     MLFLOW --> PG[("PostgreSQL mlflow DB<br/>runs, params, metrics")]
-    MLFLOW --> MINIO[("MinIO s3://mlflow/<br/>model binaries + artifacts")]
-    MLFLOW --> REG["Model Registry:<br/>car_price_predictor → alias 'production'"]
+    MLFLOW --> MINIO[("MinIO s3://mlflow/<br/>pipeline artifacts")]
+    MLFLOW --> STAGE["Model Registry:<br/>new version → alias 'staging'"]
+    STAGE --> GATE{"RMSE beats current<br/>production?"}
+    GATE -->|"yes"| REG["promote → alias 'production'"]
+    GATE -->|"no"| STAY["stays in staging"]
 ```
 
 ## Key Details
 
-- **Two paths into the listings topic**: the backend publishes directly to
-  `cars-db.public.listings` after an insert (`backend/main.py:180`), and
-  Debezium independently streams the same insert from the Postgres WAL into the
-  same topic (`debezium-connector-config.json`). The ML service tolerates both
-  raw JSON and the Debezium envelope (`ml_service/main.py:151-154`).
+- **One path into the listings topic**: Debezium streams every committed insert
+  from the Postgres WAL into `cars-db.public.listings`
+  (`debezium-connector-config.json`). The backend does **not** publish to Kafka
+  itself, so each car produces exactly one event — and changes made outside the
+  API (e.g. SQL in Adminer) are captured too.
+- **Data contract + dead letter topic**: the ML service validates every event
+  against `contracts/listing_event_v1.json` (JSON Schema, versioned in git —
+  the same contract the backend enforces at the API edge via Pydantic).
+  Violations go to `cars-db.public.listings.dlq` with the error attached;
+  nothing is silently dropped.
 - **Topics**:
   - `cars-db.public.listings` — new/changed car listings (input to ML service)
+  - `cars-db.public.listings.dlq` — contract-violating events (dead letter)
   - `cars.public.predictions` — prediction results (input to backend consumer)
-- **ML service startup** (`ml_service/main.py`): loads `label_encoders.pkl` and
-  `scaler.pkl` from disk, then pulls the most recent run's model from MLflow
-  (`runs:/{run_id}/model`), whose artifacts live in MinIO.
-- **Backend consumer** (`backend/main.py:124-161`): a daemon thread started at
-  FastAPI startup that listens on `cars.public.predictions` and writes
+- **Train/serve parity**: preprocessing lives inside a single sklearn
+  `Pipeline` (`ColumnTransformer` + `RandomForestRegressor`) that is logged to
+  MLflow as one artifact — there is no separate encoder/scaler to keep in sync.
+  `OneHotEncoder(handle_unknown='ignore')` also makes the service robust to
+  car models never seen in training.
+- **Model lifecycle**: `train.py` tags each new version `staging` and promotes
+  it to the `production` alias only if its RMSE beats the current production
+  model. The ML service loads `models:/car_price_predictor@production` and
+  stamps every prediction with the `model_version` it used (lineage).
+- **Monitoring**: every prediction is also written to the `predictions_log`
+  table by the backend consumer. `ml_service/monitor.py` compares its feature
+  distributions against `data/ford.csv` using PSI (threshold 0.2) and logs the
+  report to the `drift-monitoring` MLflow experiment.
+- **Backend consumer** (`backend/main.py`): a daemon thread started at FastAPI
+  startup that listens on `cars.public.predictions` and writes
   `predicted_price` back into Postgres, closing the loop.
 - **Streamlit** only talks to the FastAPI REST API; it never touches Kafka,
   Postgres, or MLflow directly.

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://car-price-predictor/contracts/listing_event_v1.json",
+  "title": "ListingEvent",
+  "description": "Data contract v1 for a car listing event on cars-db.public.listings (Debezium payload.after or raw JSON).",
+  "type": "object",
+  "required": [
+    "id",
+    "model",
+    "year",
+    "price",
+    "transmission",
+    "mileage",
+    "fuelType",
+    "tax",
+    "mpg",
+    "engineSize"
+  ],
+  "properties": {
+    "id": { "type": "integer" },
+    "model": { "type": "string", "minLength": 1 },
+    "year": { "type": "integer", "minimum": 1900 },
+    "price": { "type": "number", "exclusiveMinimum": 0 },
+    "transmission": { "enum": ["Manual", "Automatic", "Semi-Auto"] },
+    "mileage": { "type": "integer", "minimum": 0 },
+    "fuelType": { "enum": ["Petrol", "Diesel", "Hybrid", "Electric"] },
+    "tax": { "type": "number", "minimum": 0 },
+    "mpg": { "type": "number", "minimum": 0 },
+    "engineSize": { "type": "number", "exclusiveMinimum": 0 },
+    "predicted_price": { "type": ["number", "null"] },
+    "created_at": { "type": ["string", "null"] },
+    "updated_at": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}

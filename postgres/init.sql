@@ -29,6 +29,23 @@ CREATE TABLE IF NOT EXISTS listings (
     predicted_price DECIMAL
 );
 
+-- Prediction log for monitoring and lineage (one row per prediction served)
+CREATE TABLE IF NOT EXISTS predictions_log (
+    id SERIAL PRIMARY KEY,
+    car_id INTEGER,
+    model VARCHAR(100),
+    year INTEGER,
+    transmission VARCHAR(50),
+    mileage INTEGER,
+    fuelType VARCHAR(50),
+    tax DECIMAL,
+    mpg DECIMAL,
+    engineSize DECIMAL,
+    predicted_price DECIMAL,
+    model_version VARCHAR(50),
+    predicted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Grant permissions for cars_db
 GRANT ALL PRIVILEGES ON DATABASE cars_db TO postgres;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO postgres;

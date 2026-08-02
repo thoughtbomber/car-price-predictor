@@ -1,11 +1,9 @@
 import os
 import json
+import jsonschema
 import mlflow
 import pandas as pd
-import numpy as np
 from kafka import KafkaConsumer, KafkaProducer
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-import pickle
 from dotenv import load_dotenv
 import logging
 from typing import Optional, Dict, Any
@@ -24,11 +22,22 @@ logger = logging.getLogger(__name__)
 warnings.filterwarnings('ignore', category=UserWarning)
 warnings.filterwarnings('ignore', category=FutureWarning)
 
+KAFKA_TOPIC_LISTINGS = 'cars-db.public.listings'
+KAFKA_TOPIC_PREDICTIONS = 'cars.public.predictions'
+KAFKA_TOPIC_DLQ = 'cars-db.public.listings.dlq'
+
+MODEL_NAME = 'car_price_predictor'
+MODEL_ALIAS = 'production'
+
+MODEL_FEATURES = ['model', 'year', 'transmission', 'mileage',
+                  'fuelType', 'tax', 'mpg', 'engineSize']
+
+
 class CarPricePredictor:
     def __init__(self):
         self.model = None
-        self.label_encoders = None
-        self.scaler = None
+        self.model_version = None
+        self.contract_validator = None
         self.consumer = None
         self.producer = None
 
@@ -48,51 +57,44 @@ class CarPricePredictor:
         )
         logger.info("MinIO credentials configured")
 
-    def load_model_and_artifacts(self) -> None:
-        """Load the ML model and preprocessing artifacts"""
+    def load_contract(self) -> None:
+        """Load the data contract (JSON Schema) used to validate listing events"""
+        contract_path = Path(
+            os.getenv('CONTRACT_PATH',
+                      str(Path(__file__).parent.parent / 'contracts' / 'listing_event_v1.json'))
+        )
+        with open(contract_path) as f:
+            schema = json.load(f)
+        self.contract_validator = jsonschema.Draft202012Validator(schema)
+        logger.info(f"Loaded data contract from {contract_path}")
+
+    def load_model(self) -> None:
+        """Load the production model from the MLflow registry"""
         try:
-            logger.info("Loading model and artifacts...")
-            
+            logger.info("Loading model from MLflow registry...")
+
             self.setup_minio()
-            
-            current_dir = Path(__file__).parent
-            
-            encoder_path = current_dir / 'label_encoders.pkl'
-            with open(encoder_path, "rb") as f:
-                self.label_encoders = pickle.load(f)
-            logger.info("Loaded label encoders")
-            
-            scaler_path = current_dir / 'scaler.pkl'
-            with open(scaler_path, "rb") as f:
-                self.scaler = pickle.load(f)
-            logger.info("Loaded scaler")
-            
             mlflow.set_tracking_uri("http://localhost:5000")
-            
+
+            model_uri = f"models:/{MODEL_NAME}@{MODEL_ALIAS}"
             max_retries = 5
             for i in range(max_retries):
                 try:
-                    runs = mlflow.search_runs(experiment_ids=["1"])
-                    if len(runs) > 0:
-                        break
-                except Exception as e:
+                    self.model = mlflow.pyfunc.load_model(model_uri)
+                    break
+                except Exception:
                     if i == max_retries - 1:
                         raise
-                    logger.warning(f"Failed to connect to MLflow, retrying... ({i+1}/{max_retries})")
+                    logger.warning(f"Failed to load model, retrying... ({i+1}/{max_retries})")
                     time.sleep(5)
-            
-            if len(runs) == 0:
-                raise Exception("No runs found in MLflow")
-            
-            latest_run = runs.sort_values("start_time", ascending=False).iloc[0]
-            run_id = latest_run.run_id
-            
-            logger.info(f"Loading model from run {run_id}")
-            self.model = mlflow.pyfunc.load_model(f"runs:/{run_id}/model")
-            logger.info("Model loaded successfully")
-                
+
+            client = mlflow.tracking.MlflowClient()
+            self.model_version = client.get_model_version_by_alias(
+                MODEL_NAME, MODEL_ALIAS).version
+            logger.info(f"Loaded {model_uri} (version {self.model_version})")
+
         except Exception as e:
-            logger.error(f"Error loading model and artifacts: {str(e)}")
+            logger.error(f"Error loading model: {str(e)}")
             raise
 
     def setup_kafka(self) -> None:
@@ -101,7 +103,7 @@ class CarPricePredictor:
             KAFKA_BOOTSTRAP_SERVERS = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')
             
             self.consumer = KafkaConsumer(
-                'cars-db.public.listings',
+                KAFKA_TOPIC_LISTINGS,
                 bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
                 auto_offset_reset='earliest',
                 enable_auto_commit=True,
@@ -123,53 +125,62 @@ class CarPricePredictor:
             raise
 
     def preprocess_data(self, data: Dict[str, Any]) -> pd.DataFrame:
-        """Preprocess the input data"""
+        """Build the model input frame; encoding/scaling live inside the pipeline"""
         try:
-            df = pd.DataFrame([data])
-            
-            numeric_columns = ['year', 'mileage', 'tax', 'mpg', 'engineSize']
-            for col in numeric_columns:
-                df[col] = df[col].astype(float)
-            
-            categorical_columns = ['model', 'transmission', 'fuelType']
-            for column in categorical_columns:
-                df[column] = self.label_encoders[column].transform(df[column])
-            
-            df[numeric_columns] = self.scaler.transform(df[numeric_columns])
-            
-            return df
-            
+            return pd.DataFrame([{col: data[col] for col in MODEL_FEATURES}])
         except Exception as e:
             logger.error(f"Error preprocessing data: {str(e)}")
             raise
 
+    def validate_event(self, car_data: Dict[str, Any]) -> Optional[str]:
+        """Validate a listing event against the data contract; return error text or None"""
+        errors = list(self.contract_validator.iter_errors(car_data))
+        if errors:
+            return "; ".join(
+                f"{'/'.join(str(p) for p in e.absolute_path) or '<root>'}: {e.message}"
+                for e in errors
+            )
+        return None
+
+    def send_to_dlq(self, data: Any, error: str) -> None:
+        """Publish a contract-violating message to the dead letter topic"""
+        dlq_record = {
+            'error': error,
+            'message': data,
+            'failed_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+        }
+        self.producer.send(KAFKA_TOPIC_DLQ, value=dlq_record)
+        self.producer.flush()
+        logger.warning(f"Sent message to {KAFKA_TOPIC_DLQ}: {error}")
+
     def process_message(self, message: Any) -> Optional[Dict[str, Any]]:
-        """Process incoming Kafka message and return prediction"""
+        """Validate an incoming Kafka message against the contract and return a prediction"""
         try:
             data = message.value if isinstance(message.value, dict) else json.loads(message.value)
-            
-            if 'payload' in data and 'after' in data['payload']:
+
+            if 'payload' in data and isinstance(data['payload'], dict) and 'after' in data['payload']:
                 car_data = data['payload']['after']
             else:
                 car_data = data
-            
-            required_fields = ['model', 'year', 'transmission', 'mileage', 
-                             'fuelType', 'tax', 'mpg', 'engineSize']
-            
-            for field in required_fields:
-                if field not in car_data:
-                    logger.warning(f"Missing required field: {field}")
-                    return None
-            
+
+            # Debezium delete/tombstone events carry no new row state; nothing to predict.
+            if car_data is None:
+                return None
+
+            error = self.validate_event(car_data)
+            if error:
+                self.send_to_dlq(data, error)
+                return None
+
             processed_data = self.preprocess_data(car_data)
-            
             prediction = self.model.predict(processed_data)[0]
-            
+
             car_data['predicted_price'] = float(prediction)
             car_data['prediction_timestamp'] = time.strftime('%Y-%m-%d %H:%M:%S')
-            
+            car_data['model_version'] = self.model_version
+
             return car_data
-            
+
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
             return None
@@ -187,7 +198,7 @@ class CarPricePredictor:
                         result = self.process_message(message)
                         
                         if result:
-                            self.producer.send('cars.public.predictions', value=result)
+                            self.producer.send(KAFKA_TOPIC_PREDICTIONS, value=result)
                             self.producer.flush()
                             
                             logger.info(
@@ -221,9 +232,11 @@ def main():
         load_dotenv()
         
         predictor = CarPricePredictor()
-        
-        predictor.load_model_and_artifacts()
-        
+
+        predictor.load_contract()
+
+        predictor.load_model()
+
         predictor.setup_kafka()
         
         predictor.run()
