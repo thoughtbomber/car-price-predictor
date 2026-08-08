@@ -1,3 +1,11 @@
+"""Streamlit UI — the blog's "Product App": the human-facing edge of the system.
+
+Teaching note: the UI talks ONLY to the FastAPI backend over HTTP
+(POST /cars to add a listing, GET /cars to read them back with predictions).
+It never touches Kafka, Postgres, or MLflow directly — every prediction it
+shows has travelled the full CDC -> contract validation -> model -> write-back
+loop documented in docs/WORKFLOW.md and docs/interactive/index.html.
+"""
 import streamlit as st
 import pandas as pd
 import requests

@@ -1,5 +1,9 @@
 """Drift monitoring: compare serving data against training data.
 
+Blog mapping (docs/blog/data-system-summary.md): "Data and concept drift are
+silent failures that cannot be captured in a Data Contract; they require
+separate monitoring." This script IS that separate monitoring.
+
 Reference distribution: data/ford.csv (what the model was trained on).
 Current distribution:   cars_db.predictions_log (what the model has actually seen).
 

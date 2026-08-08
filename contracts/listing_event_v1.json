@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://car-price-predictor/contracts/listing_event_v1.json",
   "title": "ListingEvent",
-  "description": "Data contract v1 for a car listing event on cars-db.public.listings (Debezium payload.after or raw JSON).",
+  "description": "Data contract v1 for a car listing event on cars-db.public.listings (Debezium payload.after or raw JSON). A data contract has four parts (see docs/blog/data-system-summary.md): Schema (below), SLA, Semantics, and Lineage (the x- blocks).",
   "type": "object",
   "required": [
     "id",
@@ -31,5 +31,54 @@
     "created_at": { "type": ["string", "null"] },
     "updated_at": { "type": ["string", "null"] }
   },
-  "additionalProperties": true
+  "additionalProperties": true,
+
+  "x-sla": {
+    "description": "Service-level agreement: the quality guarantees the producer promises and the batch validator (ml_service/batch_validation.py) enforces on landed data.",
+    "freshness": {
+      "field": "predicted_at",
+      "max_age_hours": 24,
+      "comment": "Newest row must be no older than this — proves the pipeline is alive."
+    },
+    "completeness": {
+      "max_null_fraction": 0.0,
+      "fields": ["model", "year", "transmission", "mileage", "fuelType", "tax", "mpg", "engineSize"],
+      "comment": "No nulls allowed in any model feature column."
+    },
+    "volume": {
+      "min_rows": 1,
+      "comment": "A batch with zero rows means the stream silently stopped."
+    },
+    "ranges": {
+      "year": { "min": 1900, "max": 2100 },
+      "mileage": { "min": 0 },
+      "tax": { "min": 0 },
+      "mpg": { "min": 0 },
+      "engineSize": { "min": 0, "exclusiveMin": true }
+    }
+  },
+
+  "x-semantics": {
+    "description": "What each field MEANS (units, conventions) — schema says 'number', semantics says 'UK road tax in GBP per year'.",
+    "id": "Primary key of the listing row in cars_db.listings.",
+    "model": "Ford model name as marketed in the UK (e.g. 'Fiesta', 'Focus').",
+    "year": "Registration year (4-digit, Gregorian).",
+    "price": "Asking price in GBP (whole pounds).",
+    "transmission": "Gearbox type; one of Manual / Automatic / Semi-Auto.",
+    "mileage": "Odometer reading in miles.",
+    "fuelType": "Fuel type; one of Petrol / Diesel / Hybrid / Electric.",
+    "tax": "Annual UK Vehicle Excise Duty in GBP.",
+    "mpg": "Manufacturer combined fuel economy, miles per imperial gallon.",
+    "engineSize": "Engine displacement in litres.",
+    "predicted_price": "Model output: predicted asking price in GBP, stamped by the ML service."
+  },
+
+  "x-lineage": {
+    "description": "Where the data comes from — the chain a reader can walk back to the source.",
+    "producer": "FastAPI backend (backend/main.py) POST /cars",
+    "source_table": "cars_db.public.listings (PostgreSQL :5432)",
+    "cdc": "Debezium connector debezium-connector-config.json reads the Postgres WAL",
+    "topic": "cars-db.public.listings",
+    "consumers": ["ml_service/main.py (prediction service)", "ml_service/dlq_tools.py (on failure)"]
+  }
 }

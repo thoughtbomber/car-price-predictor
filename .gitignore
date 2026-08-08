@@ -9,3 +9,4 @@ venv/
 
 # Tooling caches
 .pytest_cache/
+data/feature_store/

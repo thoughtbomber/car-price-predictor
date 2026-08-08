@@ -1,3 +1,18 @@
+"""Training pipeline — blog step 9 (see docs/blog/data-system-summary.md).
+
+Model Training -> Model Validation -> Model Handover, all tracked by the ML
+Metadata Store (MLflow plays that role here: runs, params, metrics, artifacts,
+and the registry all land in one place):
+
+- **Training**   — a single sklearn Pipeline (ColumnTransformer + RandomForest)
+  so preprocessing is part of the model artifact. That is what guarantees
+  train/serve parity when ml_service/main.py scores with the same object.
+- **Validation** — held-out RMSE/MAE/R² logged to MLflow.
+- **Handover**   — the new version is tagged 'staging' and promoted to the
+  'production' alias ONLY if its RMSE beats the current production model
+  (the promotion gate). The serving layer loads @production, so an inferior
+  model can never leak into production.
+"""
 import os
 import logging
 import warnings
@@ -104,6 +119,18 @@ def train_model():
     df = pd.read_csv(data_path)
     X = df.drop('price', axis=1)
     y = df['price']
+
+    # Blog step 8 (Batch Feature Ingestion): persist the curated training
+    # features (+ label) in the offline feature store. In a fuller platform the
+    # training job would *read* its dataset via serve_batch() instead of a raw
+    # CSV — writing it here keeps the demo self-contained while showing where
+    # the store sits. Best-effort: training must not fail over the store.
+    try:
+        from feature_store import FeatureStore
+        FeatureStore(root=os.getenv('FEATURE_STORE_ROOT') or None).ingest_batch(
+            'training_features', X.assign(price=y))
+    except Exception as e:
+        logger.warning(f"Offline feature ingestion skipped: {e}")
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42)

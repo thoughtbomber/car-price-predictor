@@ -154,3 +154,31 @@ flowchart LR
   (:8080) for Kafka/Connect, MLflow UI (:5000), MinIO console (:9001).
 - **Seeding data**: `add_cars.sh` POSTs a batch of sample cars to
   `POST /cars`, each of which flows through the loop above.
+
+## 4. Teaching Components & Interactive Explainer
+
+This branch implements the full component set from
+`docs/blog/data-system-summary.md`. Beyond the runtime loop above:
+
+- **Contract Registry** (`ml_service/contract_registry.py`) — loads the
+  versioned contracts from `contracts/`, each carrying all four contract parts:
+  Schema (JSON Schema), SLA (`x-sla`), Semantics (`x-semantics`), Lineage
+  (`x-lineage`).
+- **DLQ Alerting & Recovery** (`ml_service/dlq_tools.py`) — the two apps the
+  blog diagram hangs off the dead letter topic: one raises alerts, one repairs
+  safe-to-fix events and republishes them to `cars-db.public.listings`.
+- **Batch SLA validation** (`ml_service/batch_validation.py`) — the scheduled
+  job that checks landed data (`predictions_log`) against the contract SLA and
+  fires alerts on breach; results logged to the `batch-validation` MLflow
+  experiment.
+- **Feature Store** (`ml_service/feature_store.py`) — the four blog APIs:
+  real-time ingestion/serving (SQLite online store, fed by `ml_service/main.py`
+  per validated event) and batch ingestion/serving (CSV offline store under
+  `data/feature_store/`, written by `ml_service/train.py`).
+
+**Interactive explainer**: open `docs/interactive/index.html` in a browser for
+a clickable architecture diagram, animated step-throughs of the prediction
+loop / failure path / training pipeline, and a blog ↔ code ↔ test mapping.
+
+All components are exercised end-to-end offline (no Docker) by
+`ml_service/tests/test_integration.py`.

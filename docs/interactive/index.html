@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Car Price Predictor — Interactive System Walkthrough</title>
+<style>
+  :root{
+    --bg:#0e131d; --bg2:#151c2b; --panel:#1a2334; --panel2:#202b40;
+    --text:#dbe3f2; --muted:#8b98b3; --line:#2b3a55;
+    --c-user:#a78bfa; --c-app:#5ea8ff; --c-stream:#f5a623; --c-store:#3ddc97; --c-ml:#f472b6;
+    --accent:#ffd166; --danger:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font-family:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+       font-size:15px;line-height:1.55}
+  header.top{padding:28px 24px 14px;max-width:1240px;margin:0 auto}
+  header.top h1{margin:0 0 4px;font-size:24px;letter-spacing:.2px}
+  header.top p{margin:0;color:var(--muted);max-width:900px}
+  nav.tabs{position:sticky;top:0;z-index:50;background:rgba(14,19,29,.96);
+           border-bottom:1px solid var(--line);backdrop-filter:blur(4px)}
+  nav.tabs .inner{max-width:1240px;margin:0 auto;display:flex;gap:4px;padding:0 24px}
+  nav.tabs button{background:none;border:none;color:var(--muted);font-size:15px;
+                  padding:12px 18px;cursor:pointer;border-bottom:3px solid transparent}
+  nav.tabs button:hover{color:var(--text)}
+  nav.tabs button.active{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
+  main{max-width:1240px;margin:0 auto;padding:20px 24px 60px}
+  section.tab{display:none}
+  section.tab.active{display:block}
+  h2{font-size:19px;margin:18px 0 10px}
+  h3{font-size:16px;margin:16px 0 6px}
+  code,kbd{font-family:Consolas,"Cascadia Mono",monospace;font-size:13px;
+           background:#0a0f18;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:#ffd98a}
+  pre{background:#0a0f18;border:1px solid var(--line);border-radius:8px;padding:14px 16px;
+      overflow-x:auto;font-family:Consolas,"Cascadia Mono",monospace;font-size:13px;line-height:1.6}
+  pre code{background:none;border:none;padding:0;color:#c9e0ff}
+  .layout{display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start}
+  @media (max-width:1000px){.layout{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .diagram-card{background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+                padding:8px;overflow-x:auto}
+  svg text{user-select:none}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin:10px 2px;font-size:13px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:14px;height:14px;border-radius:4px;display:inline-block}
+  /* diagram nodes */
+  .node{cursor:pointer}
+  .node rect.body{stroke-width:1.5;transition:filter .15s}
+  .node:hover rect.body{filter:brightness(1.35)}
+  .node text{fill:#0b101b;font-weight:600;pointer-events:none}
+  .node text.sub{font-weight:400;font-size:9.5px;fill:#1d2739}
+  .node.selected rect.body{stroke:#fff;stroke-width:2.5}
+  .node.dim{opacity:.28}
+  .node.lit rect.body{stroke:var(--accent);stroke-width:3}
+  .edge line,.edge path{stroke:#46587e;stroke-width:1.6}
+  .edge.dashed line,.edge.dashed path{stroke-dasharray:6 5}
+  .edge text{fill:#7f8fae;font-size:9.5px;paint-order:stroke;stroke:var(--bg2);stroke-width:3px}
+  .edge.dim{opacity:.12}
+  .edge.lit line,.edge.lit path{stroke:var(--accent);stroke-width:3}
+  .edge.lit text{fill:var(--accent)}
+  .band{fill:rgba(255,255,255,.025);stroke:var(--line);stroke-dasharray:3 4}
+  .band-label{fill:var(--muted);font-size:11px;font-weight:600;letter-spacing:1.5px}
+  /* detail panel */
+  #detailPanel{position:sticky;top:64px}
+  #detailPanel .ph{color:var(--muted);font-style:italic}
+  #detailPanel h3{margin-top:0}
+  #detailPanel .tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;
+                    border-radius:20px;margin-bottom:8px;color:#0b101b}
+  #detailPanel dl{margin:0}
+  #detailPanel dt{color:var(--accent);font-weight:600;font-size:12px;text-transform:uppercase;
+                  letter-spacing:.6px;margin-top:10px}
+  #detailPanel dd{margin:2px 0 0;color:var(--text)}
+  #detailPanel ul{margin:4px 0 0;padding-left:18px}
+  /* flows */
+  .flow-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0}
+  .btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);
+       border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent);color:#0b101b;border-color:var(--accent);font-weight:600}
+  .btn.scenario.active{background:var(--accent);color:#0b101b;border-color:var(--accent);font-weight:600}
+  #stepBox{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--accent);
+           border-radius:8px;padding:12px 16px;margin:12px 0;min-height:86px}
+  #stepBox .st-title{font-weight:700;margin-bottom:4px}
+  #stepBox .st-num{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+  #stepBox .st-text{color:var(--text)}
+  /* mapping table */
+  table.map{border-collapse:collapse;width:100%;margin-top:8px;font-size:14px}
+  table.map th,table.map td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  table.map th{background:var(--panel2);color:var(--accent);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+  table.map tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  .note{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Car Price Predictor — Interactive System Walkthrough</h1>
+  <p>A teaching map of the repo: every component, which concept from
+     <code>docs/blog/data-system-summary.md</code> it implements, and how data flows through the
+     system at runtime, on failure, and during training. Click any node in the diagram.</p>
+</header>
+
+<nav class="tabs">
+  <div class="inner">
+    <button data-tab="architecture" class="active">Architecture</button>
+    <button data-tab="flows">Flows</button>
+    <button data-tab="mapping">Mapping</button>
+    <button data-tab="run">Run it</button>
+  </div>
+</nav>
+
+<main>
+  <!-- ================= ARCHITECTURE ================= -->
+  <section class="tab active" id="tab-architecture">
+    <div class="legend">
+      <span><i style="background:var(--c-user)"></i>User layer</span>
+      <span><i style="background:var(--c-app)"></i>Application layer</span>
+      <span><i style="background:var(--c-stream)"></i>Streaming layer</span>
+      <span><i style="background:var(--c-store)"></i>Storage</span>
+      <span><i style="background:var(--c-ml)"></i>ML platform</span>
+      <span style="margin-left:auto">Dashed = failure / auxiliary path</span>
+    </div>
+    <div class="layout">
+      <div class="diagram-card" id="archDiagram"></div>
+      <aside class="card" id="detailPanel">
+        <p class="ph">Click a component in the diagram to see what it does, which blog concept it
+        implements, its code file and key functions, and its inputs/outputs.</p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ================= FLOWS ================= -->
+  <section class="tab" id="tab-flows">
+    <h2>Play the flow</h2>
+    <p class="note">Pick a scenario, then step through it. The active components and edges light up
+    in the diagram. Use ▶ for auto-play.</p>
+    <div class="flow-controls" id="scenarioButtons"></div>
+    <div class="flow-controls">
+      <button class="btn" id="btnPrev">← Back</button>
+      <button class="btn primary" id="btnPlay">▶ Play</button>
+      <button class="btn" id="btnNext">Next →</button>
+      <button class="btn" id="btnReset">⟲ Reset</button>
+    </div>
+    <div id="stepBox">
+      <div class="st-num">Step 0 / 0</div>
+      <div class="st-title">Select a scenario above</div>
+      <div class="st-text"></div>
+    </div>
+    <div class="diagram-card" id="flowDiagram"></div>
+  </section>
+
+  <!-- ================= MAPPING ================= -->
+  <section class="tab" id="tab-mapping">
+    <h2>Blog concept ↔ repo file ↔ test that proves it</h2>
+    <p class="note">Blog = <code>docs/blog/data-system-summary.md</code>. Tests live in
+    <code>ml_service/tests/</code> — run them with <code>pytest ml_service/tests/</code>.</p>
+    <div id="mappingTable"></div>
+  </section>
+
+  <!-- ================= RUN IT ================= -->
+  <section class="tab" id="tab-run">
+    <h2>How to run it</h2>
+    <h3>1. Start the infrastructure</h3>
+    <pre><code>docker compose up -d
+# Postgres :5432 · Kafka :9092 · Debezium :8083 · MLflow :5000
+# MinIO :9000 (console :9001) · Adminer :8081 · Redpanda Console :8080</code></pre>
+    <h3>2. Train and register a model</h3>
+    <pre><code>python ml_service/train.py
+# logs to MLflow, tags the new version 'staging',
+# promotes it to 'production' only if RMSE beats the current production model</code></pre>
+    <h3>3. Start the services</h3>
+    <pre><code>uvicorn backend.main:app --reload          # REST API on :8000
+python ml_service/main.py                  # streaming prediction consumer
+streamlit run streamlit_app/app.py         # UI on :8501</code></pre>
+    <h3>4. Teaching scripts (data-quality concepts)</h3>
+    <pre><code>python ml_service/batch_validation.py    # batch SLA validation over landed data
+python ml_service/dlq_tools.py --alert   # alerting app over the dead-letter topic
+python ml_service/dlq_tools.py --recover # recovery app: fix + republish failed events
+python ml_service/monitor.py             # drift report (PSI, predictions_log vs ford.csv)</code></pre>
+    <p class="note">Then add a car in the Streamlit UI and watch it travel:
+    Postgres → Debezium → Kafka → ML service → predictions topic → backend → UI.
+    Inspect topics in Redpanda Console (:8080) and tables in Adminer (:8081).</p>
+  </section>
+</main>
+
+<script>
+"use strict";
+/* ============================================================
+ * DATA — components, edges, flows. Everything is generated from
+ * these arrays; ids here are the single source of truth.
+ * ============================================================ */
+var LAYER_COLORS = {user:"#a78bfa", app:"#5ea8ff", stream:"#f5a623", store:"#3ddc97", ml:"#f472b6"};
+
+var COMPONENTS = [
+ {id:"streamlit", name:"Streamlit UI", sub:"streamlit_app/app.py · :8501", layer:"user", cx:170, cy:76,
+  what:"Web UI where a user adds a car listing and later sees its predicted price. Talks to the FastAPI backend over REST only — it knows nothing about Kafka or MLflow.",
+  blog:"The 'Product App' at the end of the serving path (blog deployment layer: model serving → Product Apps).",
+  file:"streamlit_app/app.py", funcs:["add-car form → POST /cars","listings table → GET /cars"],
+  inputs:"User form input (model, year, price, transmission, mileage, fuelType, tax, mpg, engineSize)",
+  outputs:"HTTP requests to the backend; rendered listings with predicted_price"},
+
+ {id:"adminer", name:"Adminer", sub:"DB admin UI · :8081", layer:"user", cx:560, cy:76,
+  what:"Database administration UI for PostgreSQL. Lets you inspect cars_db.listings (raw data) and cars_db.predictions_log (what the model actually served) side by side.",
+  blog:"Operational convenience — makes the producer/consumer sides of the Data Contract visible.",
+  file:"docker-compose.yml (adminer service)", funcs:[],
+  inputs:"Postgres :5432", outputs:"Web table browser"},
+
+ {id:"redpanda", name:"Redpanda Console", sub:"Kafka UI · :8080", layer:"user", cx:950, cy:76,
+  what:"Topic inspector for Kafka. Watch cars-db.public.listings (raw CDC events), cars-db.public.listings.dlq (contract violations) and cars.public.predictions in real time.",
+  blog:"Observability into blog steps 2–5: raw topic → validation → validated / dead-letter topics.",
+  file:"docker-compose.yml (redpanda-console service)", funcs:[],
+  inputs:"Kafka :9092", outputs:"Web topic/message browser"},
+
+ {id:"backend", name:"FastAPI backend", sub:"backend/main.py · :8000", layer:"app", cx:130, cy:205,
+  what:"REST API. POST /cars validates the payload with Pydantic and inserts into Postgres — it deliberately never publishes to Kafka; Debezium CDC does that. A background thread (KafkaManager) consumes cars.public.predictions, writes predicted_price back onto the listing row, and appends every prediction to predictions_log for lineage and drift monitoring.",
+  blog:"The Data Producer side of the contract (steps 1–2: applications generate raw data). The consumer thread closes the inference loop (serving layer).",
+  file:"backend/main.py", funcs:["create_car()","get_cars()","KafkaManager._consume_predictions()","KafkaManager._handle_prediction()"],
+  inputs:"HTTP POST/GET /cars from Streamlit; Kafka topic cars.public.predictions",
+  outputs:"Rows in cars_db.listings; predicted_price updates; predictions_log entries"},
+
+ {id:"mlsvc", name:"ML prediction service", sub:"ml_service/main.py", layer:"app", cx:360, cy:205,
+  what:"Streaming consumer of the listings topic. Unwraps the Debezium envelope (payload.after), validates every event against the data contract with jsonschema, routes violations to the dead-letter topic, otherwise loads the car_price_predictor@production model from the MLflow registry, predicts, and republishes the event with predicted_price, prediction_timestamp and model_version.",
+  blog:"Step 3 stream validation against the Contract Registry · step 4 dead-letter path · step 10 inference serving with the registry's PRODUCTION model.",
+  file:"ml_service/main.py", funcs:["load_contract()","load_model()","validate_event()","send_to_dlq()","process_message()","run()"],
+  inputs:"Topic cars-db.public.listings; contract contracts/listing_event_v1.json; model car_price_predictor@production",
+  outputs:"Topic cars.public.predictions (valid events + price); topic cars-db.public.listings.dlq (violations + error)"},
+
+ {id:"dlq", name:"DLQ alerting + recovery", sub:"ml_service/dlq_tools.py", layer:"app", cx:590, cy:205,
+  what:"Two teaching apps over the dead-letter topic. --alert consumes cars-db.public.listings.dlq and raises an alert per failed event. --recover attempts to repair the original message (e.g. fix out-of-range values), re-validates it against the contract, and republishes it to the listings topic so the normal loop can pick it up.",
+  blog:"Step 4 (diagram): the Recovery app and Alerting app downstream of the Invalidated / Dead Letter Topic.",
+  file:"ml_service/dlq_tools.py", funcs:["alert mode (--alert)","recover mode (--recover)"],
+  inputs:"Topic cars-db.public.listings.dlq; the data contract for re-validation",
+  outputs:"Alerts to the operator; corrected events republished to cars-db.public.listings"},
+
+ {id:"registry", name:"Contract registry", sub:"ml_service/contract_registry.py + contracts/listing_event_v1.json", layer:"app", cx:830, cy:205,
+  what:"Versioned home of the data contract. listing_event_v1.json is a JSON Schema (Draft 2020-12) for a listing event, plus three x- blocks: x-sla (freshness: newest row < 24h; completeness: no nulls in feature columns; volume: min_rows; ranges per numeric field), x-semantics (what each field MEANS — 'tax is annual UK Vehicle Excise Duty in GBP'), and x-lineage (producer → source table → CDC → topic → consumers).",
+  blog:"Step 1: the Data Contract = Schema + SLA + Semantics + Lineage, held in a central Data Contract Registry that both producers and consumers consult.",
+  file:"ml_service/contract_registry.py, contracts/listing_event_v1.json", funcs:["load/resolve contract versions"],
+  inputs:"Contract JSON files under contracts/", outputs:"Parsed schema + SLA + semantics + lineage to validators"},
+
+ {id:"fstore", name:"Feature store", sub:"ml_service/feature_store.py", layer:"app", cx:1080, cy:205,
+  what:"Teaching feature store exposing the four APIs: real-time feature serving, real-time feature ingestion, batch feature ingestion, and batch feature serving. The point: training and inference read the SAME features, guaranteeing train/serve parity.",
+  blog:"Step 8 Feature Store with its four APIs (diagram), plus step 10: the same features served for inference.",
+  file:"ml_service/feature_store.py", funcs:["RT serving API","RT ingestion API","batch ingestion API","batch serving API"],
+  inputs:"Validated events (real-time) and curated batches", outputs:"Feature vectors for training and for inference"},
+
+ {id:"train", name:"Training script", sub:"ml_service/train.py", layer:"app", cx:240, cy:315,
+  what:"Builds ONE sklearn Pipeline — ColumnTransformer (OneHotEncoder for model/transmission/fuelType, StandardScaler for year/mileage/tax/mpg/engineSize) feeding a RandomForestRegressor — so preprocessing travels with the model. Trains on ford.csv, logs params, rmse/mae/r2 and the model to MLflow, tags the new version 'staging', then promotes it to 'production' ONLY if its RMSE beats the model currently behind the production alias (challenger vs champion).",
+  blog:"Step 9: Model Training → Model Validation → Model Handover, tracked by the ML Metadata Store; deployment layer: Model Registry STAGING → PRODUCTION.",
+  file:"ml_service/train.py", funcs:["build_pipeline()","get_production_rmse()","train_model()"],
+  inputs:"data/ford.csv; current production RMSE from the MLflow registry",
+  outputs:"MLflow run (params + metrics + model artifact in MinIO); registry version with 'staging' / 'production' alias"},
+
+ {id:"monitor", name:"Drift monitor", sub:"ml_service/monitor.py", layer:"app", cx:560, cy:315,
+  what:"Computes the Population Stability Index (PSI) per feature between the training reference (ford.csv) and what the model has actually served (predictions_log). PSI > 0.2 flags significant drift. Prints a report and logs the metrics to MLflow experiment 'drift-monitoring' so a tracking trail builds up.",
+  blog:"The closing caveat: data and concept drift are silent failures that NO data contract can capture — they require separate monitoring.",
+  file:"ml_service/monitor.py", funcs:["psi_numeric()","psi_categorical()","load_reference()","load_current()","main()"],
+  inputs:"data/ford.csv (reference); cars_db.predictions_log (serving)",
+  outputs:"Console drift report; PSI metrics logged to MLflow"},
+
+ {id:"batchval", name:"Batch SLA validator", sub:"ml_service/batch_validation.py", layer:"app", cx:880, cy:315,
+  what:"Scheduled job that re-validates landed data (predictions_log) against the contract's x-sla block: freshness (newest predicted_at < 24h — proves the pipeline is alive), completeness (no nulls in feature columns), volume (a zero-row batch means the stream silently stopped), and per-field ranges. Alerts when a check fails.",
+  blog:"Step 7: scheduled batch validation against additional SLAs in the Data Contract — with an alerting path on failure (diagram).",
+  file:"ml_service/batch_validation.py", funcs:["SLA checks (freshness / completeness / volume / ranges)","CLI entrypoint"],
+  inputs:"cars_db.predictions_log; contract x-sla rules", outputs:"Pass/fail report; alert on violation"},
+
+ {id:"debezium", name:"Debezium CDC", sub:"debezium-connector-config.json · :8083", layer:"stream", cx:880, cy:440,
+  what:"Change Data Capture connector. Reads the PostgreSQL write-ahead log (WAL) and turns every insert/update on cars_db.listings into an event on the topic cars-db.public.listings — no polling, no dual-write in the backend.",
+  blog:"Step 2.1: CDC streams — raw data topics fed by Change Data Capture from operational databases.",
+  file:"debezium-connector-config.json", funcs:["PostgresConnector","WAL → Kafka source connector"],
+  inputs:"Postgres WAL (cars_db.public.listings)", outputs:"Topic cars-db.public.listings"},
+
+ {id:"kafka", name:"Kafka", sub:":9092 · 3 topics", layer:"stream", cx:560, cy:440,
+  what:"The streaming backbone. Topics: cars-db.public.listings (raw CDC events awaiting validation), cars-db.public.listings.dlq (contract violations with the error attached), cars.public.predictions (validated events enriched with predicted_price).",
+  blog:"Steps 2–5: producers emit raw data to topics; validated data and dead letters land on separate topics so consumers only see validated data.",
+  file:"docker-compose.yml (kafka service)", funcs:[],
+  inputs:"CDC events, DLQ records, predictions", outputs:"Same, to subscribed consumers"},
+
+ {id:"zk", name:"Zookeeper", sub:"Kafka coordination", layer:"stream", cx:240, cy:440,
+  what:"Coordination and metadata service for the Kafka broker (broker registration, controller election, topic config).",
+  blog:"Infrastructure detail behind the streaming layer (steps 2–5).",
+  file:"docker-compose.yml (zookeeper service)", funcs:[],
+  inputs:"Kafka broker heartbeats/config", outputs:"Cluster metadata"},
+
+ {id:"fordcsv", name:"ford.csv", sub:"data/ford.csv · training reference", layer:"store", cx:240, cy:580,
+  what:"~179k rows of used Ford listings (model, year, price, transmission, mileage, fuelType, tax, mpg, engineSize). The curated historical dataset the model trains on — and the reference distribution for drift monitoring.",
+  blog:"The curated, modeled data that feeds step 9 (ML training) and the baseline for drift detection (caveats).",
+  file:"data/ford.csv", funcs:[],
+  inputs:"—", outputs:"Training rows; PSI reference distribution"},
+
+ {id:"pg", name:"PostgreSQL", sub:":5432 · cars_db + mlflow store", layer:"store", cx:560, cy:580,
+  what:"cars_db.listings is the operational source of truth (and CDC source); cars_db.predictions_log is the append-only record of every served prediction (lineage + drift input); the same server also hosts MLflow's backend store (runs, metrics, registry metadata).",
+  blog:"The operational database of step 2.1; predictions_log plays the 'landed data' role that the batch SLA validator (step 7) re-checks.",
+  file:"postgres/init.sql", funcs:["listings","predictions_log","mlflow backend store"],
+  inputs:"SQL from backend; MLflow metadata", outputs:"WAL → Debezium; rows to validators/monitor"},
+
+ {id:"minio", name:"MinIO (S3)", sub:":9000 api · :9001 console", layer:"store", cx:880, cy:580,
+  what:"S3-compatible object storage. MLflow's artifact store: the serialized sklearn pipeline for each run lands in the 'mlflow' bucket and is fetched from here when the @production model is loaded.",
+  blog:"Object-storage layer (step 6 analogue) — durable landing zone for model artifacts.",
+  file:"docker-compose.yml (minio service)", funcs:[],
+  inputs:"Model artifacts from MLflow", outputs:"Artifacts on load_model()"},
+
+ {id:"mlflow", name:"MLflow", sub:":5000 · tracking + registry", layer:"ml", cx:560, cy:700,
+  what:"Tracking server (experiments: car-price-prediction, drift-monitoring) and Model Registry. The registered model car_price_predictor carries the aliases 'staging' and 'production'; the prediction service loads models:/car_price_predictor@production, and train.py moves the aliases.",
+  blog:"ML Metadata Store (metadata/lineage across the pipeline) + Model Registry with STAGING → PRODUCTION promotion (deployment layer).",
+  file:"mlflow/Dockerfile", funcs:["mlflow server","model registry aliases"],
+  inputs:"Runs/metrics/models from train.py and monitor.py", outputs:"@production model to the prediction service"}
+];
+
+/* edges: {id, from, to, label?, dashed?, curve? (perpendicular bend in px)} */
+var EDGES = [
+ {id:"e1",  from:"streamlit", to:"backend",  label:"REST :8000"},
+ {id:"e2",  from:"backend",   to:"pg",       label:"SQL"},
+ {id:"e3",  from:"pg",        to:"debezium", label:"WAL", curve:-28},
+ {id:"e4",  from:"debezium",  to:"kafka",    label:"topic: cars-db.public.listings"},
+ {id:"e5",  from:"kafka",     to:"mlsvc",    label:"consume", curve:24},
+ {id:"e6",  from:"mlsvc",     to:"registry", label:"validate vs contract"},
+ {id:"e7",  from:"mlsvc",     to:"mlflow",   label:"load @production", curve:-30},
+ {id:"e8",  from:"mlsvc",     to:"kafka",    label:"topic: cars.public.predictions", curve:-26},
+ {id:"e9",  from:"mlsvc",     to:"kafka",    label:"topic: …listings.dlq", dashed:true, curve:70},
+ {id:"e10", from:"kafka",     to:"backend",  label:"predictions consumer", curve:-24},
+ {id:"e11", from:"kafka",     to:"dlq",      label:"dlq consume", dashed:true, curve:-24},
+ {id:"e12", from:"dlq",       to:"kafka",    label:"republish (recovered)", dashed:true},
+ {id:"e13", from:"redpanda",  to:"kafka",    dashed:true},
+ {id:"e14", from:"adminer",   to:"pg",       dashed:true},
+ {id:"e15", from:"fordcsv",   to:"train",    label:"read csv"},
+ {id:"e16", from:"train",     to:"mlflow",   label:"log run + register model"},
+ {id:"e17", from:"mlflow",    to:"minio",    label:"artifacts"},
+ {id:"e18", from:"mlflow",    to:"pg",       label:"backend store"},
+ {id:"e19", from:"monitor",   to:"pg",       label:"predictions_log", curve:20},
+ {id:"e20", from:"monitor",   to:"fordcsv",  label:"reference"},
+ {id:"e21", from:"monitor",   to:"mlflow",   label:"drift metrics", curve:-20},
+ {id:"e22", from:"batchval",  to:"pg",       label:"landed batch", curve:-20},
+ {id:"e23", from:"batchval",  to:"registry", label:"SLA rules"},
+ {id:"e24", from:"kafka",     to:"fstore",   label:"RT ingestion", dashed:true, curve:40},
+ {id:"e25", from:"fstore",    to:"pg",       label:"batch serving", dashed:true, curve:-30},
+ {id:"e26", from:"zk",        to:"kafka",    dashed:true}
+];
+
+var FLOWS = {
+ runtime:{name:"(a) Runtime prediction loop", steps:[
+  {t:"User adds a car", nodes:["streamlit"], edges:[],
+   x:"In the Streamlit UI the user fills the listing form (model, year, price, transmission, mileage, fuelType, tax, mpg, engineSize) and submits."},
+  {t:"POST /cars to the backend", nodes:["streamlit","backend"], edges:["e1"],
+   x:"Streamlit calls the FastAPI backend. Pydantic (CarBase) performs cheap request-level validation before anything touches the database."},
+  {t:"INSERT into cars_db.listings", nodes:["backend","pg"], edges:["e2"],
+   x:"The backend inserts the row and commits. Crucially it does NOT publish to Kafka — that would be a dual-write. The database is the single source of truth."},
+  {t:"Debezium reads the WAL", nodes:["pg","debezium"], edges:["e3"],
+   x:"The Debezium connector tails the Postgres write-ahead log and sees the committed insert. This is Change Data Capture (blog step 2.1)."},
+  {t:"Event lands on the listings topic", nodes:["debezium","kafka"], edges:["e4"],
+   x:"Debezium publishes the change event (with payload.after = the new row) to cars-db.public.listings — the raw data topic."},
+  {t:"Stream validation against the contract", nodes:["kafka","mlsvc","registry"], edges:["e5","e6"],
+   x:"The ML service consumes the event and validates payload.after against contracts/listing_event_v1.json (Schema). This is blog step 3: raw → validated, enforced upstream of inference."},
+  {t:"Load the production model", nodes:["mlsvc","mlflow"], edges:["e7"],
+   x:"The service resolves models:/car_price_predictor@production from the MLflow registry — it always serves whatever version currently holds the production alias."},
+  {t:"Predict the price", nodes:["mlsvc"], edges:[],
+   x:"The sklearn Pipeline one-hot encodes categoricals, scales numerics and the RandomForest predicts. The event is enriched with predicted_price, prediction_timestamp and model_version."},
+  {t:"Publish to the predictions topic", nodes:["mlsvc","kafka"], edges:["e8"],
+   x:"The enriched event is published to cars.public.predictions — the validated-data topic for consumers."},
+  {t:"Backend consumer picks it up", nodes:["kafka","backend"], edges:["e10"],
+   x:"The backend's background KafkaManager thread consumes the prediction."},
+  {t:"Write predicted_price back", nodes:["backend","pg"], edges:["e2"],
+   x:"The backend updates listings.predicted_price AND appends the full event to predictions_log (lineage + the input for drift monitoring and batch SLA validation)."},
+  {t:"User sees the price", nodes:["streamlit","backend"], edges:["e1"],
+   x:"On the next refresh Streamlit re-fetches GET /cars and the listing shows its predicted price. Loop closed — entirely through the database and the stream, never a direct call to the model."}
+ ]},
+ failure:{name:"(b) Failure path: DLQ + alerting + recovery", steps:[
+  {t:"A contract-violating event arrives", nodes:["kafka","mlsvc"], edges:["e5"],
+   x:"A malformed event reaches cars-db.public.listings — e.g. year = 1800 (schema minimum is 1900) or fuelType = 'LPG' (not in the enum). Bad data happens; the contract decides what counts as bad."},
+  {t:"Validation fails", nodes:["mlsvc","registry"], edges:["e6"],
+   x:"validate_event() runs the JSON Schema and collects the violations. The event is NOT allowed to reach the model — quality is enforced upstream of inference."},
+  {t:"Sent to the dead-letter topic", nodes:["mlsvc","kafka"], edges:["e9"],
+   x:"send_to_dlq() wraps the original message together with the error text and a failed_at timestamp, and publishes it to cars-db.public.listings.dlq (blog step 4). The main loop continues unaffected."},
+  {t:"Alerting app fires", nodes:["kafka","dlq"], edges:["e11"],
+   x:"python ml_service/dlq_tools.py --alert consumes the DLQ and raises an alert for each failed event — a human learns that data quality broke, and why."},
+  {t:"Recovery app attempts a fix", nodes:["dlq","registry"], edges:[],
+   x:"python ml_service/dlq_tools.py --recover reads the failed message, tries to repair it (e.g. clamp an out-of-range value, fill a fixable field) and re-validates against the contract."},
+  {t:"Republish the corrected event", nodes:["dlq","kafka"], edges:["e12"],
+   x:"If the fix validates, the event is republished to cars-db.public.listings. If not, it stays dead-lettered for manual inspection (visible in Redpanda Console :8080)."},
+  {t:"Normal loop resumes", nodes:["kafka","mlsvc"], edges:["e5"],
+   x:"The republished event flows through validation and prediction exactly like scenario (a). No data silently dropped, no model poisoned by invalid input."}
+ ]},
+ training:{name:"(c) Training pipeline + drift + batch SLA", steps:[
+  {t:"Load the training data", nodes:["fordcsv","train"], edges:["e15"],
+   x:"train.py loads data/ford.csv — the curated historical dataset (~179k used-Ford listings). Blog step 9 starts from high-quality, modeled data."},
+  {t:"Train the sklearn Pipeline", nodes:["train"], edges:[],
+   x:"One Pipeline: ColumnTransformer(OneHotEncoder: model/transmission/fuelType · StandardScaler: year/mileage/tax/mpg/engineSize) → RandomForestRegressor. Preprocessing travels WITH the model, so train/serve parity is structural (blog step 10)."},
+  {t:"Log the run to MLflow", nodes:["train","mlflow"], edges:["e16"],
+   x:"Params, metrics (rmse, mae, r2), the model signature and the serialized pipeline are logged under experiment 'car-price-prediction', and the model is registered as car_price_predictor. MLflow is the ML Metadata Store."},
+  {t:"Artifacts → MinIO, metadata → Postgres", nodes:["mlflow","minio","pg"], edges:["e17","e18"],
+   x:"The model binary lands in MinIO's mlflow bucket; run metadata and registry state go to the Postgres backend store."},
+  {t:"Tag the new version 'staging'", nodes:["mlflow"], edges:[],
+   x:"The registry alias 'staging' is moved to the freshly trained version — Model Handover, blog deployment layer."},
+  {t:"Promote only if RMSE wins", nodes:["mlflow"], edges:[],
+   x:"Challenger vs champion: train.py reads the current production version's RMSE. The 'production' alias moves to the new version only if its RMSE is lower; otherwise the challenger stays in staging and production keeps serving the old model."},
+  {t:"Drift monitoring loop", nodes:["monitor","pg","fordcsv","mlflow"], edges:["e19","e20","e21"],
+   x:"python ml_service/monitor.py compares predictions_log (what the model actually saw) against ford.csv (what it trained on) with PSI per feature. PSI > 0.2 = significant drift; metrics are logged to MLflow experiment 'drift-monitoring'. Contracts cannot catch drift — separate monitoring does (blog caveats)."},
+  {t:"Batch SLA validation job", nodes:["batchval","pg","registry"], edges:["e22","e23"],
+   x:"python ml_service/batch_validation.py re-checks the landed data against the contract's x-sla block: freshness (newest row < 24h), completeness (no nulls in feature columns), volume (batch not empty), ranges. A failure raises an alert — blog step 7."}
+ ]}
+};
+
+var MAPPING = [
+ ["Data Contract = Schema + SLA + Semantics + Lineage (step 1)",
+  "contracts/listing_event_v1.json + ml_service/contract_registry.py",
+  "ml_service/tests/test_contract_registry.py"],
+ ["CDC streams from the operational DB (step 2.1)",
+  "debezium-connector-config.json",
+  "ml_service/tests/test_integration.py"],
+ ["Stream validation against the contract (step 3)",
+  "ml_service/main.py — validate_event(), process_message()",
+  "ml_service/tests/test_predictor.py"],
+ ["Dead Letter Topic + Recovery & Alerting apps (step 4)",
+  "ml_service/main.py — send_to_dlq() + ml_service/dlq_tools.py",
+  "ml_service/tests/test_dlq_tools.py"],
+ ["Scheduled batch SLA validation + alerting (step 7)",
+  "ml_service/batch_validation.py + x-sla block of the contract",
+  "ml_service/tests/test_batch_validation.py"],
+ ["Feature Store with 4 APIs (steps 8, 8.1, 10)",
+  "ml_service/feature_store.py",
+  "ml_service/tests/test_feature_store.py"],
+ ["Model Registry: staging → production promotion (deployment layer)",
+  "ml_service/train.py — get_production_rmse(), alias promotion",
+  "ml_service/tests/test_integration.py"],
+ ["Drift monitoring (PSI > 0.2) — contracts can't catch drift (caveats)",
+  "ml_service/monitor.py + cars_db.predictions_log",
+  "ml_service/tests/test_integration.py"],
+ ["End-to-end runtime loop (producer → CDC → validate → predict → serve)",
+  "backend/main.py + ml_service/main.py",
+  "ml_service/tests/test_integration.py"]
+];
+
+/* ============================================================
+ * RENDERING
+ * ============================================================ */
+var NS = "http://www.w3.org/2000/svg";
+var NODE_W = 176, NODE_H = 56;
+var BANDS = [
+ {label:"USER LAYER",        y:20,  h:112},
+ {label:"APPLICATION LAYER", y:150, h:232},
+ {label:"STREAMING LAYER",   y:398, h:92},
+ {label:"STORAGE",           y:506, h:132},
+ {label:"ML PLATFORM",       y:654, h:96}
+];
+var SVG_W = 1220, SVG_H = 770;
+
+function byId(arr, id){ for (var i=0;i<arr.length;i++) if (arr[i].id===id) return arr[i]; return null; }
+
+function el(tag, attrs, parent){
+  var e = document.createElementNS(NS, tag);
+  for (var k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+/* point on the border of node rect in direction of (tx,ty) */
+function borderPoint(c, tx, ty){
+  var dx = tx - c.cx, dy = ty - c.cy;
+  if (dx === 0 && dy === 0) return {x:c.cx, y:c.cy};
+  var hw = NODE_W/2, hh = NODE_H/2;
+  var sx = dx !== 0 ? hw / Math.abs(dx) : Infinity;
+  var sy = dy !== 0 ? hh / Math.abs(dy) : Infinity;
+  var s = Math.min(sx, sy);
+  return {x: c.cx + dx*s, y: c.cy + dy*s};
+}
+
+function edgeGeometry(ed){
+  var a = byId(COMPONENTS, ed.from), b = byId(COMPONENTS, ed.to);
+  var p1 = borderPoint(a, b.cx, b.cy), p2 = borderPoint(b, a.cx, a.cy);
+  if (ed.curve){
+    var mx = (p1.x+p2.x)/2, my = (p1.y+p2.y)/2;
+    var dx = p2.x-p1.x, dy = p2.y-p1.y;
+    var len = Math.sqrt(dx*dx+dy*dy) || 1;
+    /* perpendicular unit vector, flipped to point "left" of travel */
+    var nx = -dy/len, ny = dx/len;
+    var cx = mx + nx*ed.curve, cy = my + ny*ed.curve;
+    return {d:"M "+p1.x+" "+p1.y+" Q "+cx+" "+cy+" "+p2.x+" "+p2.y,
+            lx: (p1.x+p2.x)/4 + cx/2, ly: (p1.y+p2.y)/4 + cy/2};
+  }
+  return {d:"M "+p1.x+" "+p1.y+" L "+p2.x+" "+p2.y,
+          lx:(p1.x+p2.x)/2, ly:(p1.y+p2.y)/2};
+}
+
+function renderDiagram(container, clickable){
+  container.innerHTML = "";
+  var svg = el("svg", {viewBox:"0 0 "+SVG_W+" "+SVG_H, width:"100%",
+                       style:"min-width:900px;display:block"}, container);
+
+  var defs = el("defs", {}, svg);
+  var marker = el("marker", {id:"arrow-"+container.id, markerWidth:"8", markerHeight:"8",
+                             refX:"7", refY:"4", orient:"auto"}, defs);
+  el("path", {d:"M0,0 L8,4 L0,8 Z", fill:"#46587e"}, marker);
+
+  BANDS.forEach(function(b){
+    el("rect", {"class":"band", x:8, y:b.y, width:SVG_W-16, height:b.h, rx:10}, svg);
+    var t = el("text", {"class":"band-label", x:22, y:b.y+18}, svg);
+    t.textContent = b.label;
+  });
+
+  EDGES.forEach(function(ed){
+    var g = el("g", {"class":"edge"+(ed.dashed?" dashed":""), id:container.id+"-edge-"+ed.id}, svg);
+    var geo = edgeGeometry(ed);
+    el("path", {d:geo.d, fill:"none",
+                "marker-end":"url(#arrow-"+container.id+")"}, g);
+    if (ed.label){
+      var t = el("text", {x:geo.lx, y:geo.ly-4, "text-anchor":"middle"}, g);
+      t.textContent = ed.label;
+    }
+  });
+
+  COMPONENTS.forEach(function(c){
+    var g = el("g", {"class":"node", id:container.id+"-node-"+c.id}, svg);
+    var col = LAYER_COLORS[c.layer];
+    el("rect", {"class":"body", x:c.cx-NODE_W/2, y:c.cy-NODE_H/2,
+                width:NODE_W, height:NODE_H, rx:9, fill:col, stroke:"#0b101b"}, g);
+    var t1 = el("text", {x:c.cx, y:c.cy-(c.sub?4:-4), "text-anchor":"middle", "font-size":"12.5"}, g);
+    t1.textContent = c.name;
+    if (c.sub){
+      var t2 = el("text", {"class":"sub", x:c.cx, y:c.cy+14, "text-anchor":"middle"}, g);
+      t2.textContent = c.sub.length > 34 ? c.sub.slice(0,33)+"…" : c.sub;
+      t2.setAttribute("title", c.sub);
+    }
+    if (clickable){
+      g.addEventListener("click", function(){ showDetail(c.id); });
+    }
+  });
+  return svg;
+}
+
+/* ---------- architecture: detail panel ---------- */
+var selectedNode = null;
+function showDetail(id){
+  var c = byId(COMPONENTS, id);
+  if (!c) return;
+  if (selectedNode){
+    var prev = document.getElementById("archDiagram-node-"+selectedNode);
+    if (prev) prev.classList.remove("selected");
+  }
+  selectedNode = id;
+  var g = document.getElementById("archDiagram-node-"+id);
+  if (g) g.classList.add("selected");
+  var col = LAYER_COLORS[c.layer];
+  var funcs = c.funcs.length
+    ? "<ul>"+c.funcs.map(function(f){return "<li><code>"+f+"</code></li>";}).join("")+"</ul>"
+    : "—";
+  document.getElementById("detailPanel").innerHTML =
+    "<span class='tag' style='background:"+col+"'>"+c.layer.toUpperCase()+"</span>"+
+    "<h3>"+c.name+"</h3>"+
+    "<dl>"+
+    "<dt>What it does</dt><dd>"+c.what+"</dd>"+
+    "<dt>Blog concept</dt><dd>"+c.blog+"</dd>"+
+    "<dt>Code</dt><dd><code>"+c.file+"</code></dd>"+
+    "<dt>Key functions</dt><dd>"+funcs+"</dd>"+
+    "<dt>Inputs</dt><dd>"+c.inputs+"</dd>"+
+    "<dt>Outputs</dt><dd>"+c.outputs+"</dd>"+
+    "</dl>";
+}
+
+/* ---------- flows ---------- */
+var currentScenario = "runtime";
+var currentStep = -1;         /* -1 = not started */
+var playTimer = null;
+
+function scenarioKeys(){ return Object.keys(FLOWS); }
+
+function buildScenarioButtons(){
+  var box = document.getElementById("scenarioButtons");
+  box.innerHTML = "";
+  scenarioKeys().forEach(function(key){
+    var b = document.createElement("button");
+    b.className = "btn scenario" + (key===currentScenario ? " active" : "");
+    b.textContent = FLOWS[key].name;
+    b.addEventListener("click", function(){
+      stopPlay(); currentScenario = key; currentStep = -1;
+      buildScenarioButtons(); paintFlow();
+    });
+    box.appendChild(b);
+  });
+}
+
+function paintFlow(){
+  var flow = FLOWS[currentScenario];
+  var n = flow.steps.length;
+  var step = currentStep >= 0 ? flow.steps[currentStep] : null;
+  var activeNodes = step ? step.nodes : [];
+  var activeEdges = step ? step.edges : [];
+
+  COMPONENTS.forEach(function(c){
+    var g = document.getElementById("flowDiagram-node-"+c.id);
+    if (!g) return;
+    g.classList.remove("lit","dim");
+    if (step){
+      if (activeNodes.indexOf(c.id) >= 0) g.classList.add("lit");
+      else g.classList.add("dim");
+    }
+  });
+  EDGES.forEach(function(ed){
+    var g = document.getElementById("flowDiagram-edge-"+ed.id);
+    if (!g) return;
+    g.classList.remove("lit","dim");
+    if (step){
+      if (activeEdges.indexOf(ed.id) >= 0) g.classList.add("lit");
+      else g.classList.add("dim");
+    }
+  });
+
+  var box = document.getElementById("stepBox");
+  if (!step){
+    box.innerHTML = "<div class='st-num'>Step 0 / "+n+"</div>"+
+      "<div class='st-title'>"+flow.name+"</div>"+
+      "<div class='st-text'>Press Next → or ▶ Play to walk through the scenario.</div>";
+  } else {
+    box.innerHTML = "<div class='st-num'>Step "+(currentStep+1)+" / "+n+"</div>"+
+      "<div class='st-title'>"+step.t+"</div>"+
+      "<div class='st-text'>"+step.x+"</div>";
+  }
+}
+
+function stepForward(){
+  var n = FLOWS[currentScenario].steps.length;
+  if (currentStep < n-1){ currentStep++; paintFlow(); }
+  else stopPlay();
+}
+function stepBack(){
+  if (currentStep > -1){ currentStep--; paintFlow(); }
+}
+function stopPlay(){
+  if (playTimer){ clearInterval(playTimer); playTimer = null; }
+  document.getElementById("btnPlay").textContent = "▶ Play";
+}
+function togglePlay(){
+  if (playTimer){ stopPlay(); return; }
+  var n = FLOWS[currentScenario].steps.length;
+  if (currentStep >= n-1) currentStep = -1;
+  stepForward();
+  playTimer = setInterval(stepForward, 2400);
+  document.getElementById("btnPlay").textContent = "⏸ Pause";
+}
+
+/* ---------- mapping table ---------- */
+function renderMapping(){
+  var html = "<table class='map'><tr><th>Blog concept</th><th>Repo file / symbol</th><th>Test that proves it</th></tr>";
+  MAPPING.forEach(function(r){
+    html += "<tr><td>"+r[0]+"</td><td><code>"+r[1]+"</code></td><td><code>"+r[2]+"</code></td></tr>";
+  });
+  document.getElementById("mappingTable").innerHTML = html + "</table>";
+}
+
+/* ---------- tabs ---------- */
+function initTabs(){
+  var buttons = document.querySelectorAll("nav.tabs button");
+  buttons.forEach(function(b){
+    b.addEventListener("click", function(){
+      buttons.forEach(function(x){ x.classList.remove("active"); });
+      b.classList.add("active");
+      document.querySelectorAll("section.tab").forEach(function(s){ s.classList.remove("active"); });
+      document.getElementById("tab-"+b.getAttribute("data-tab")).classList.add("active");
+    });
+  });
+}
+
+/* ---------- boot ---------- */
+initTabs();
+renderDiagram(document.getElementById("archDiagram"), true);
+renderDiagram(document.getElementById("flowDiagram"), false);
+buildScenarioButtons();
+paintFlow();
+renderMapping();
+document.getElementById("btnPrev").addEventListener("click", function(){ stopPlay(); stepBack(); });
+document.getElementById("btnNext").addEventListener("click", function(){ stopPlay(); stepForward(); });
+document.getElementById("btnReset").addEventListener("click", function(){ stopPlay(); currentStep=-1; paintFlow(); });
+document.getElementById("btnPlay").addEventListener("click", togglePlay);
+</script>
+</body>
+</html>

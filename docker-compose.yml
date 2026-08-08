@@ -1,7 +1,14 @@
+# docker-compose — the teaching stack for the blog's "Data Pipelines in ML
+# Systems" architecture (see docs/blog/data-system-summary.md). Each service is
+# annotated with the blog role it plays. Interactive explainer:
+# docs/interactive/index.html
 version: '3.8'
 
 services:
-  # PostgreSQL - Source Database
+  # PostgreSQL - Source Database (blog: the operational DB that CDC watches).
+  # Also doubles as: the "validated data landing zone" (predictions_log) and
+  # the MLflow backend store (metadata store) — one engine, three teaching roles.
+  # wal_level=logical is REQUIRED: Debezium reads changes from the WAL.
   postgres:
     image: postgres:15
     environment:
@@ -56,7 +63,9 @@ services:
       timeout: 10s
       retries: 3
 
-  # Debezium Connect
+  # Debezium Connect (blog step 2.1: CDC streams) — tails the Postgres WAL and
+  # publishes every committed change to Kafka topics like cars-db.public.listings.
+  # Connector registration lives in debezium-connector-config.json.
   connect:
     image: debezium/connect:2.4
     depends_on:
@@ -80,7 +89,8 @@ services:
       timeout: 10s
       retries: 3
 
-  # MinIO (S3-compatible storage)
+  # MinIO (S3-compatible storage; blog: object storage / artifact store).
+  # Holds the MLflow model artifacts (the trained Pipeline binaries).
   minio:
     image: minio/minio
     ports:
@@ -98,7 +108,10 @@ services:
       timeout: 20s
       retries: 3
 
-  # MLflow
+  # MLflow (blog: ML Metadata Store + Model Registry) — tracks every training
+  # run (params/metrics/artifacts) and hosts the staging -> production aliases
+  # that ml_service/train.py's promotion gate and ml_service/main.py's
+  # @production model load revolve around.
   mlflow:
     build:
       context: ./mlflow

@@ -2,6 +2,16 @@
 
 A machine learning system for predicting car prices using MLflow and Streamlit. This project implements a complete pipeline for predicting car prices with an interactive web interface and real-time visualization.
 
+> **Teaching branch** (`feat/production-ml-pipeline`): this branch doubles as a
+> guided tour of the blog architecture in `docs/blog/data-system-summary.md`
+> (data contracts, CDC, stream validation, DLQ, feature store, model registry,
+> drift monitoring). Every module is annotated with the blog concept it
+> implements, and there is a clickable walkthrough of the whole system:
+>
+> **→ Open `docs/interactive/index.html` in a browser** (double-click — no
+> server needed) for an interactive architecture diagram with animated data
+> flows and a blog-component ↔ code ↔ test mapping table.
+
 ## Architecture
 
 - **Frontend**: Streamlit application for data visualization and interaction
@@ -110,11 +120,17 @@ streamlit run app.py
 │   └── ford.csv          # Sample car data
 ├── ml_service/           # ML training and prediction service
 │   ├── train.py         # Model training script (Pipeline + staging→production gate)
-│   ├── main.py          # Prediction service (contract validation + DLQ)
+│   ├── main.py          # Prediction service (contract validation + DLQ + online feature ingestion)
 │   ├── monitor.py       # Drift monitoring report (PSI vs training data)
-│   └── tests/           # Unit tests (pytest)
-├── contracts/            # Data contracts (JSON Schema, versioned)
+│   ├── contract_registry.py  # Contract Registry: loads versioned contracts (Schema+SLA+Semantics+Lineage)
+│   ├── feature_store.py # Feature Store: online (SQLite) + offline (CSV) with 4 APIs
+│   ├── dlq_tools.py     # DLQ Alerting & Recovery apps (--alert / --recover)
+│   ├── batch_validation.py   # Scheduled batch SLA validation job (+ alert path)
+│   └── tests/           # Unit + offline integration tests (pytest)
+├── contracts/            # Data contracts (JSON Schema + x-sla/x-semantics/x-lineage, versioned)
 │   └── listing_event_v1.json
+├── docs/
+│   └── interactive/index.html  # Interactive architecture explainer (open in a browser)
 ├── mlflow/               # MLflow service configuration
 ├── postgres/            # PostgreSQL initialization scripts
 ├── streamlit_app/       # Streamlit frontend application
@@ -174,6 +190,35 @@ Note: the `predictions_log` table is created by `postgres/init.sql`, which only
 runs on a fresh database volume. For an existing deployment either recreate the
 volume (`docker compose down -v` — this wipes all data) or create the table
 manually via Adminer.
+
+### Teaching Components (blog architecture)
+
+These standalone scripts implement the remaining components from
+`docs/blog/data-system-summary.md`. They are covered by `ml_service/tests/`
+and runnable on demand:
+
+```bash
+cd ml_service
+
+# Batch SLA validation (blog step 7): check landed predictions against the
+# contract's x-sla block (freshness/completeness/volume/ranges); alerts + MLflow log.
+python batch_validation.py
+
+# DLQ apps (blog step 4): tail the dead-letter topic and alert / repair+republish.
+python dlq_tools.py --alert
+python dlq_tools.py --recover
+```
+
+The **Contract Registry** (`contract_registry.py`) and **Feature Store**
+(`feature_store.py`, online SQLite + offline CSV under `data/feature_store/`)
+are libraries used by the services above rather than standalone scripts. Run
+the whole offline flow — validation → DLQ → recovery → feature store →
+training parity → SLA check → drift — via the integration test:
+
+```bash
+cd ml_service
+python -m pytest tests -v
+```
 
 ## API Documentation
 

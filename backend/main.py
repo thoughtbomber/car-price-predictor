@@ -1,3 +1,19 @@
+"""FastAPI backend — the blog's "Data Producer" edge plus the prediction write-back loop.
+
+Blog mapping (docs/blog/data-system-summary.md):
+- **Producer**: the REST API is where car listings enter the system. It writes
+  ONLY to Postgres; it never publishes to Kafka directly. Debezium CDC turns
+  every committed insert into exactly one event on cars-db.public.listings, so
+  even manual SQL edits (e.g. via Adminer) are captured — the database is the
+  single source of truth.
+- **API-edge validation**: the Pydantic models below enforce the SAME rules as
+  the data contract (contracts/listing_event_v1.json). That is the contract's
+  Schema part applied at the producer edge, before data even lands.
+- **Write-back consumer**: a daemon thread consumes cars.public.predictions and
+  writes predicted_price back into Postgres, closing the prediction loop, and
+  appends every served prediction to predictions_log — the landing zone that
+  batch_validation.py (SLA checks) and monitor.py (drift) later read.
+"""
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
@@ -228,8 +244,6 @@ async def shutdown_event():
     KafkaManager._running = False
     if KafkaManager._consumer_thread:
         KafkaManager._consumer_thread.join(timeout=5)
-    if KafkaManager._producer:
-        KafkaManager._producer.close()
     logger.info("Application shutdown complete")
 
 if __name__ == "__main__":

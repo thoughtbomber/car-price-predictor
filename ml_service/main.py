@@ -1,3 +1,15 @@
+"""ML prediction service — the blog's stream validator + inference in one process.
+
+Blog mapping (docs/blog/data-system-summary.md):
+- step 3  "stream validation": every CDC event is validated against the data
+  contract (contracts/listing_event_v1.json) BEFORE it may flow downstream.
+- step 4  violations go to the dead letter topic (see dlq_tools.py for the
+  alerting/recovery apps that consume it).
+- step 10 the validated event is scored with the SAME sklearn Pipeline that was
+  trained offline (train/serve parity — preprocessing travels inside the model).
+- model   loaded from the MLflow registry's @production alias, i.e. only models
+  that passed the promotion gate in train.py are ever served here.
+"""
 import os
 import json
 import jsonschema
@@ -32,6 +44,9 @@ MODEL_ALIAS = 'production'
 MODEL_FEATURES = ['model', 'year', 'transmission', 'mileage',
                   'fuelType', 'tax', 'mpg', 'engineSize']
 
+# Feature group name in the feature store (see feature_store.py).
+FEATURE_GROUP = 'listing_features'
+
 
 class CarPricePredictor:
     def __init__(self):
@@ -40,6 +55,16 @@ class CarPricePredictor:
         self.contract_validator = None
         self.consumer = None
         self.producer = None
+        # Online feature store (blog step 8.1: real-time feature ingestion).
+        # Best-effort: if the store cannot be initialised the service still
+        # predicts — the store is an observability/parity aid here, not a
+        # hard dependency of the serving path.
+        try:
+            from feature_store import FeatureStore
+            self.feature_store = FeatureStore(root=os.getenv('FEATURE_STORE_ROOT') or None)
+        except Exception as e:
+            logger.warning(f"Feature store unavailable, continuing without it: {e}")
+            self.feature_store = None
 
     def setup_minio(self):
         """Configure MinIO credentials"""
@@ -63,7 +88,7 @@ class CarPricePredictor:
             os.getenv('CONTRACT_PATH',
                       str(Path(__file__).parent.parent / 'contracts' / 'listing_event_v1.json'))
         )
-        with open(contract_path) as f:
+        with open(contract_path, encoding='utf-8') as f:
             schema = json.load(f)
         self.contract_validator = jsonschema.Draft202012Validator(schema)
         logger.info(f"Loaded data contract from {contract_path}")
@@ -171,6 +196,17 @@ class CarPricePredictor:
             if error:
                 self.send_to_dlq(data, error)
                 return None
+
+            # Blog step 8.1: real-time feature ingestion. The validated event's
+            # features are upserted into the online store so they can be served
+            # later with train/serve parity (blog step 10). Best-effort — a
+            # store hiccup must never block a prediction.
+            if self.feature_store is not None:
+                try:
+                    self.feature_store.ingest_online(
+                        FEATURE_GROUP, {k: car_data.get(k) for k in ['id'] + MODEL_FEATURES})
+                except Exception as e:
+                    logger.warning(f"Online feature ingestion failed (continuing): {e}")
 
             processed_data = self.preprocess_data(car_data)
             prediction = self.model.predict(processed_data)[0]

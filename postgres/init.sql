@@ -1,3 +1,10 @@
+-- postgres/init.sql — runs ONCE on a fresh database volume.
+-- Teaching note: this single Postgres plays three roles from the blog:
+--   1. the operational source DB that Debezium CDC watches (cars_db.listings)
+--   2. the "validated data landing zone" (cars_db.predictions_log) that the
+--      batch SLA validation job and drift monitor read
+--   3. the MLflow backend store (mlflow db) — the ML Metadata Store
+
 -- Create databases
 CREATE DATABASE mlflow;
 CREATE DATABASE cars_db;
@@ -14,7 +21,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO p
 -- Connect to cars_db and set up the listings table and permissions
 \c cars_db;
 
--- Create the listings table
+-- Create the listings table (the Data Producer's table; Debezium streams every
+-- committed insert here to the cars-db.public.listings Kafka topic)
 CREATE TABLE IF NOT EXISTS listings (
     id SERIAL PRIMARY KEY,
     model VARCHAR(100),
